@@ -49,9 +49,10 @@ def _road(*sides: Side) -> TileFeature:
 _MON = TileFeature(FeatureKind.MONASTERY)
 _GAR = TileFeature(FeatureKind.GARDEN)
 
-# NOTE: garden distribution (8 gardens, on which copies) is our approximation of
-# the new-edition (C3) layout — verify against the physical rulebook and adjust
-# counts here if it differs; nothing else depends on the exact split.
+# Letter shapes, per-letter counts, and shield placement are verified against the
+# official base-game distribution. Only WHICH copies of E/H/N/P/U/V carry the 8
+# gardens is an approximation of the 3rd-edition ("C3") layout — adjust the _G
+# splits below if the physical rulebook differs; nothing else depends on it.
 DECK: tuple[TileType, ...] = (
     TileType("A", 2, (_MON, _road(Side.S))),
     TileType("B", 4, (_MON,)),
@@ -86,4 +87,5 @@ DECK: tuple[TileType, ...] = (
 )
 
 TILE_TYPES: dict[str, TileType] = {t.id: t for t in DECK}
+assert len(TILE_TYPES) == len(DECK), "duplicate tile id in DECK"
 START_TILE_ID = "D"

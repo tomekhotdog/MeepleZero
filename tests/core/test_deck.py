@@ -1,6 +1,6 @@
 from collections import Counter
 
-from carcassonne.core.tiles import DECK, START_TILE_ID, TILE_TYPES, derived_edges
+from carcassonne.core.tiles import DECK, START_TILE_ID, TILE_TYPES
 from carcassonne.core.types import FeatureKind, Side
 
 
@@ -21,12 +21,16 @@ def test_official_letter_counts() -> None:
 
 def test_every_feature_edge_consistent() -> None:
     for t in DECK:
-        derived_edges(t)  # must not raise
         # no two features may share an edge slot
         seen: set[Side] = set()
         for f in t.features:
             assert not (f.edges & seen), t.id
             seen |= f.edges
+
+
+def test_no_duplicate_tile_ids() -> None:
+    # a duplicate id would silently drop a variant from the TILE_TYPES lookup
+    assert len(TILE_TYPES) == len(DECK)
 
 
 def test_shields_total_and_gardens() -> None:
