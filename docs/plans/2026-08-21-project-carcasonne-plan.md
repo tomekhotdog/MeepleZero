@@ -31,7 +31,7 @@ not a standalone move — a turn always places a tile. The Move type is
 
 ## Phase 0 — Scaffolding
 
-### Task 1: Project scaffolding
+### Task 1: Project scaffolding ✅ DONE (71e6d8f; torch → optional `ml` extra: Intel Mac, no torch≥2.4 wheels — relax to `torch>=2.2` when Phase 4 starts)
 **Depends on:** none
 
 **Files:**

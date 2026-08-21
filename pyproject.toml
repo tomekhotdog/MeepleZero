@@ -23,7 +23,9 @@ packages = ["carcassonne"]
 line-length = 100
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B"]
+# TID251: wire up banned-api config to enforce layering (core -> game -> agents/nn -> training/web)
+# once cross-layer imports exist (Phase 3+).
+select = ["E", "F", "I", "UP", "B", "TID251"]
 
 [tool.mypy]
 strict = true
