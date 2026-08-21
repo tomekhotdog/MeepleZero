@@ -439,7 +439,7 @@ tests rely on.)
 
 ---
 
-### Task 5: Feature connectivity (union-find) 
+### Task 5: Feature connectivity (union-find) ✅ DONE (b0f70ba)
 **Depends on:** Task 3 (parallel with Task 4)
 
 **Files:**
