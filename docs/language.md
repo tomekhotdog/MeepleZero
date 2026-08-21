@@ -14,8 +14,10 @@ defined term; in docs, bold on first use per section.
 - **Meeple** — a follower placed on a Feature; **MeepleKind** is MEEPLE or ABBOT.
   The **Abbot** may only be placed on a MONASTERY or GARDEN and may be retrieved
   in lieu of placing a Meeple.
-- **Move** — one full turn decision: `PlaceTile(pos, rotation, meeple?)` or
-  `RetrieveAbbot(pos)`. One Move = one ply in the game tree.
+- **Move** — one full turn decision: `Move(pos, rotation, action)` where the
+  action is `None`, `PlaceMeeple(feature, kind)`, or `RetrieveAbbot()` (a tile
+  is always placed; abbot retrieval replaces the meeple step). One Move = one
+  ply in the game tree.
 - **GameState** — the immutable complete state of a game: board, deck, supplies,
   scores, current drawn tile, feature connectivity.
 - **PlacedTile** — a Tile fixed on the board at a **Pos** (x, y grid coordinate)

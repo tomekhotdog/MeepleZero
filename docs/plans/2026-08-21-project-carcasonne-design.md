@@ -89,7 +89,9 @@ sit on top. Enforced by import-lint in CI, not package boundaries.
   scorable, no meeples on them. Farmers are a future extension the tile data
   already anticipates (edges are recorded; field *features* are not).
 - **Move = one full turn decision:**
-  `PlaceTile(pos, rotation, meeple: FeaturePlacement | None) | RetrieveAbbot(pos)`.
+  `Move(pos, rotation, action)` with `action: None | PlaceMeeple(feature, kind) | RetrieveAbbot()`.
+  (Corrected at planning time: a turn always places a tile; abbot retrieval
+  happens *instead of placing a meeple*, not instead of the whole turn.)
   Single-ply turns keep the game tree at one node per turn — better for MCTS than
   a two-ply split. Accepted trade-off: larger per-node action space (mitigated:
   few legal meeple spots per placement).
