@@ -88,7 +88,7 @@ Create the package directories with empty `__init__.py` files. Set up env:
 
 ## Phase 1 — Core engine
 
-### Task 2: Core types and tile schema
+### Task 2: Core types and tile schema ✅ DONE (f25ac7d + review fix: direct rotated_feature_sides test)
 **Depends on:** Task 1
 
 **Files:**
