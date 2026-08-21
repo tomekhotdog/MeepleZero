@@ -17,6 +17,9 @@ def frontier(board: Board) -> set[Pos]:
 
 
 def fits(board: Board, tt: TileType, pos: Pos, rot: Rotation) -> bool:
+    """True iff tt at (pos, rot) touches >=1 tile and every touching edge matches."""
+    if pos in board:
+        return False
     touching = False
     for side in Side:
         n = pos.neighbor(side)
@@ -32,4 +35,5 @@ def fits(board: Board, tt: TileType, pos: Pos, rot: Rotation) -> bool:
 
 
 def placements_for_tile(board: Board, tt: TileType) -> list[tuple[Pos, Rotation]]:
+    """All legal placements, deterministically ordered by (Pos, Rotation)."""
     return [(p, r) for p in sorted(frontier(board)) for r in Rotation if fits(board, tt, p, r)]
