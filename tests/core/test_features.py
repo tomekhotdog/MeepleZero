@@ -1,8 +1,10 @@
+import pytest
+
 from carcassonne.core.features import FeatureIndex, Meeple
 from carcassonne.core.placement import fits
 from carcassonne.core.state import Board, PlacedTile, empty_board_with_start
 from carcassonne.core.tiles import TILE_TYPES
-from carcassonne.core.types import FeatureKind, MeepleKind, Pos, Rotation
+from carcassonne.core.types import FeatureKind, MeepleKind, Pos, Rotation, RulesError
 
 
 def _integrate(board: Board, idx: FeatureIndex, pos: Pos, tile: PlacedTile) -> FeatureIndex:
@@ -87,6 +89,59 @@ def test_with_meeple_and_without_feature_meeples_roundtrip() -> None:
     cleared = with_m.without_feature_meeples(root)
     assert cleared.root_data(non_root).meeples == ()
     assert with_m.root_data(non_root).meeples == (m,)  # original untouched
+
+
+def test_shields_survive_multiway_merge_without_double_count() -> None:
+    # Two shielded M cities (city N+W) bridged by G (city N-S): one feature, 2 shields.
+    board: Board = {}
+    idx = FeatureIndex.empty()
+    idx = _integrate(board, idx, Pos(0, 0), PlacedTile("M", Rotation.R0))  # city {N,W}
+    idx = _integrate(board, idx, Pos(0, 2), PlacedTile("M", Rotation.R180))  # city {S,E}
+    assert fits(board, TILE_TYPES["G"], Pos(0, 1), Rotation.R0)
+    idx = _integrate(board, idx, Pos(0, 1), PlacedTile("G", Rotation.R0))
+
+    merged = idx.root_data((Pos(0, 0), 0))
+    assert merged.shields == 2
+    assert merged.tiles == frozenset({Pos(0, 0), Pos(0, 1), Pos(0, 2)})
+    assert merged.open_edges == 2  # the two Ms' free city edges
+    assert idx.completed_now == ()
+
+
+def test_one_tile_with_two_features_closing_the_same_blob() -> None:
+    # A single connected city approaches (1,0) from BOTH sides; H's two separate
+    # city features each merge into that same blob in one with_tile call.
+    ring = (
+        (Pos(0, 0), "N", Rotation.R90),  # city {E,N}, unshielded
+        (Pos(0, 1), "N", Rotation.R180),  # city {S,E}
+        (Pos(1, 1), "F", Rotation.R0),  # city {E,W}, shield
+        (Pos(2, 1), "N", Rotation.R270),  # city {W,S}
+        (Pos(2, 0), "N", Rotation.R0),  # city {N,W}
+    )
+    board: Board = {}
+    idx = FeatureIndex.empty()
+    for pos, tid, rot in ring:
+        if board:
+            assert fits(board, TILE_TYPES[tid], pos, rot)
+        idx = _integrate(board, idx, pos, PlacedTile(tid, rot))
+    blob = idx.root_data((Pos(0, 0), 0))
+    assert blob.open_edges == 2 and blob.shields == 1  # both open ends face (1,0)
+
+    assert fits(board, TILE_TYPES["H"], Pos(1, 0), Rotation.R0)  # cities E and W
+    idx = _integrate(board, idx, Pos(1, 0), PlacedTile("H", Rotation.R0))
+
+    assert len(idx.completed_now) == 1
+    city = idx.completed_now[0]
+    assert city.kind is FeatureKind.CITY
+    assert len(city.tiles) == 6
+    assert city.shields == 1  # blob's shield counted exactly once through both merges
+    assert city.open_edges == 0
+
+
+def test_with_tile_rejects_reintegrating_a_position() -> None:
+    board = empty_board_with_start()
+    idx = FeatureIndex.empty().with_tile(board, Pos(0, 0))
+    with pytest.raises(RulesError, match="already integrated"):
+        idx.with_tile(board, Pos(0, 0))
 
 
 def test_monastery_nodes_never_union() -> None:

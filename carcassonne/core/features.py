@@ -4,9 +4,15 @@ from dataclasses import dataclass, replace
 
 from carcassonne.core.state import Board
 from carcassonne.core.tiles import TILE_TYPES, rotated_feature_sides
-from carcassonne.core.types import FeatureKind, MeepleKind, Player, Pos, Side
+from carcassonne.core.types import FeatureKind, MeepleKind, Player, Pos, RulesError, Side
 
 type NodeId = tuple[Pos, int]
+
+
+def _find(parent: dict[NodeId, NodeId], n: NodeId) -> NodeId:
+    while parent[n] != n:
+        n = parent[n]
+    return n
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,12 +42,17 @@ class FeatureIndex:
         return FeatureIndex({}, {})
 
     def find(self, n: NodeId) -> NodeId:
-        while self.parent[n] != n:
-            n = self.parent[n]
-        return n
+        return _find(self.parent, n)
 
     def with_tile(self, board: Board, pos: Pos) -> FeatureIndex:
-        """Return a new index with `pos`'s tile integrated; sets completed_now."""
+        """Return a new index with `pos`'s tile integrated; sets completed_now.
+
+        The placement itself must already be edge-valid (see `placement.fits`);
+        this method only defends against gross misuse, not kind mismatches on
+        individual edges of an illegally-built board.
+        """
+        if (pos, 0) in self.parent:
+            raise RulesError(f"tile at {pos} already integrated into feature index")
         placed = board[pos]
         tt = TILE_TYPES[placed.type_id]
         parent = dict(self.parent)
@@ -55,13 +66,8 @@ class FeatureIndex:
             if f.kind in (FeatureKind.CITY, FeatureKind.ROAD):
                 new_nodes.append((node, sides))
 
-        def find(n: NodeId) -> NodeId:
-            while parent[n] != n:
-                n = parent[n]
-            return n
-
         def union(a: NodeId, b: NodeId) -> None:
-            ra, rb = find(a), find(b)
+            ra, rb = _find(parent, a), _find(parent, b)
             if ra == rb:  # loop closes: two open slots consumed
                 d = data[ra]
                 data[ra] = replace(d, open_edges=d.open_edges - 2)
@@ -85,6 +91,11 @@ class FeatureIndex:
                 ntt = TILE_TYPES[nplaced.type_id]
                 for j, nf in enumerate(ntt.features):
                     if side.opposite in rotated_feature_sides(nf, nplaced.rotation):
+                        if nf.kind is not tt.features[node[1]].kind:
+                            raise RulesError(
+                                f"edge kind mismatch at {pos}/{side.name}: board was not "
+                                "placement-validated"
+                            )
                         union(node, (npos, j))
                         break
 
@@ -105,9 +116,10 @@ class FeatureIndex:
         data = dict(self.data)
         d = data[root]
         data[root] = replace(d, meeples=d.meeples + (m,))
-        return FeatureIndex(dict(self.parent), data, self.completed_now)
+        # parent is never mutated in place anywhere, so aliasing it is safe
+        return FeatureIndex(self.parent, data, self.completed_now)
 
     def without_feature_meeples(self, root: NodeId) -> FeatureIndex:
         data = dict(self.data)
         data[root] = replace(data[root], meeples=())
-        return FeatureIndex(dict(self.parent), data, self.completed_now)
+        return FeatureIndex(self.parent, data, self.completed_now)
