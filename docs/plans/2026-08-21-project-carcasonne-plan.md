@@ -233,7 +233,7 @@ profiling ever demands it — not now.
 
 ---
 
-### Task 3: Full base-game deck data
+### Task 3: Full base-game deck data ✅ DONE
 **Depends on:** Task 2
 
 **Files:**
