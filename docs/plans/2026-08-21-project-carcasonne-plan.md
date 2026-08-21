@@ -343,7 +343,7 @@ Shield check: C(1) + F(2) + M(2) + O(2) + Q(1) + S(2) = 10 ✓. Gardens: 1+1+1+2
 
 ---
 
-### Task 4: GameState and placement legality
+### Task 4: GameState and placement legality ✅ DONE (af4b65b)
 **Depends on:** Task 3
 
 **Files:**
