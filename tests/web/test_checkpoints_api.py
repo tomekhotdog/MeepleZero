@@ -126,3 +126,10 @@ def test_unknown_checkpoint_is_422_with_explanation(client: TestClient) -> None:
     body: dict[str, Any] = r.json()
     assert body["error"] == "unknown_opponent"
     assert "step_999999" in body["explanation"]
+
+
+def test_checkpoint_id_path_traversal_is_rejected(client: TestClient) -> None:
+    # ckpt:../.. must never reach the filesystem (would unpickle an arbitrary file)
+    for evil in ("ckpt:../../etc/passwd", "ckpt:../secret", r"ckpt:..\\secret"):
+        r = client.post("/api/games", json={"opponent": evil, "human_player": 0, "seed": 1})
+        assert r.status_code == 422, evil

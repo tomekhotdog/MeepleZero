@@ -83,12 +83,19 @@ def make_checkpoint_agent(spec: str) -> Agent:
 
 
 def _resolve(directory: Path, ident: str) -> Path:
-    """Map a ckpt id to an existing file, or raise ``ValueError``."""
+    """Map a ckpt id to an existing file, or raise ``ValueError``.
+
+    The id arrives unsanitised from the web ``opponent`` field, so reject anything
+    with path separators or ``..`` — otherwise ``ckpt:../../x`` would load (and
+    unpickle) an arbitrary file, an RCE vector under ``serve --host 0.0.0.0``.
+    """
     if ident == "latest":
         path = latest(directory)
         if path is None:
             raise ValueError(f"no checkpoints found in {directory}")
         return path
+    if "/" in ident or "\\" in ident or ".." in ident:
+        raise ValueError(f"invalid checkpoint id {ident!r}")
     candidates = [directory / f"{ident}.pt", directory / f"step_{ident}.pt"]
     if ident.isdigit():
         candidates.append(directory / f"step_{int(ident):06d}.pt")
