@@ -594,9 +594,27 @@ $("lens").addEventListener("click", rotate);
 
 // --- boot ---------------------------------------------------------------------------------------------------------
 
+async function populateCheckpoints() {
+  // Offer each saved checkpoint as a `ckpt:<id>` opponent. If none are configured
+  // the dialog keeps just greedy/random.
+  try {
+    const { checkpoints } = await api("/api/checkpoints");
+    const select = $("opt-opponent");
+    for (const ckpt of checkpoints) {
+      const opt = document.createElement("option");
+      opt.value = `ckpt:${ckpt.id}`;
+      opt.textContent = `Checkpoint ${ckpt.step}`;
+      select.appendChild(opt);
+    }
+  } catch {
+    /* checkpoints are optional; ignore a missing/errored endpoint */
+  }
+}
+
 async function boot() {
   const defs = await api("/api/tiledefs");
   S.tiledefs = defs.tiles;
+  await populateCheckpoints();
   updateSidebar();
   requestAnimationFrame(render);
   dialog.showModal(); // choose opponent/seat/seed, then play

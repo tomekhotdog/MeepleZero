@@ -53,6 +53,12 @@ def _build_parser() -> argparse.ArgumentParser:
     srv.add_argument(
         "--replays", type=Path, default=Path("replays"), help="replay directory (default replays/)"
     )
+    srv.add_argument(
+        "--checkpoints",
+        type=Path,
+        default=None,
+        help="checkpoints directory: enables ckpt:<id> opponents (default: none)",
+    )
     return parser
 
 
@@ -121,7 +127,7 @@ def _serve(args: argparse.Namespace) -> int:
     from carcassonne.web.app import create_app
 
     # Single worker on purpose: game sessions are in-process state (see web.sessions).
-    uvicorn.run(create_app(args.replays), host=args.host, port=args.port)
+    uvicorn.run(create_app(args.replays, args.checkpoints), host=args.host, port=args.port)
     return 0
 
 

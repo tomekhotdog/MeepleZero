@@ -77,13 +77,22 @@ def ai_move_view(move: Move, annot: Annot | None) -> dict[str, Any]:
 def hint_view(legal: list[Move], annot: Annot | None) -> dict[str, Any]:
     """Placement policy aggregated per (x, y, rot), meeple variants summed,
     renormalised to 1. Without an annot (e.g. the random agent) the policy is
-    uniform over legal moves and the value is 0."""
+    uniform over legal moves and the value is 0.
+
+    ``top`` carries the raw per-move candidates -- prior AND visits -- so a hint
+    from an MctsAgent shows the search's prior-vs-visits story, not just the
+    aggregated heatmap. It is empty when there is no annot (random agent)."""
     if annot is None:
         weighted = [(m, 1.0) for m in legal]
         value = 0.0
+        top: list[dict[str, Any]] = []
     else:
         weighted = [(m, prior) for m, prior, _ in annot.top]
         value = annot.value
+        top = [
+            {"move": move_to_json(m), "prior": prior, "visits": visits}
+            for m, prior, visits in annot.top
+        ]
     agg: dict[tuple[int, int, int], float] = {}
     for move, w in weighted:
         key = (move.pos.x, move.pos.y, int(move.rotation))
@@ -93,7 +102,7 @@ def hint_view(legal: list[Move], annot: Annot | None) -> dict[str, Any]:
         {"x": x, "y": y, "rot": rot, "prob": w / total}
         for (x, y, rot), w in sorted(agg.items(), key=lambda kv: (-kv[1], kv[0]))
     ]
-    return {"policy": policy, "value": value}
+    return {"policy": policy, "value": value, "top": top}
 
 
 def tiledefs_view() -> dict[str, Any]:

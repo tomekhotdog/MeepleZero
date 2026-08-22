@@ -2,12 +2,13 @@
 
 Public API: Agent, TurnContext, RandomAgent, GreedyAgent, MctsAgent, MctsConfig,
 make_agent. Importing this package registers the parameterless built-in agents
-with the registry in `base`. MctsAgent needs a net + device, so it is exported
-here but *not* registered under a bare "mcts" spec -- checkpoint specs
-("ckpt:<id>") arrive in Task 17.
+with the registry in `base`, plus the ``ckpt:<id>`` checkpoint-opponent prefix
+(see `checkpoints`), which resolves against a directory configured at app startup.
 """
 
+from carcassonne.agents import checkpoints  # noqa: F401 -- registers the "ckpt:" prefix
 from carcassonne.agents.base import Agent, TurnContext, make_agent
+from carcassonne.agents.checkpoints import list_checkpoints, set_checkpoints_dir
 from carcassonne.agents.greedy import GreedyAgent
 from carcassonne.agents.mcts import MctsAgent, MctsConfig
 from carcassonne.agents.random_agent import RandomAgent
@@ -19,5 +20,7 @@ __all__ = [
     "MctsConfig",
     "RandomAgent",
     "TurnContext",
+    "list_checkpoints",
     "make_agent",
+    "set_checkpoints_dir",
 ]

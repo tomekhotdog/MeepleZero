@@ -19,6 +19,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from carcassonne.agents import list_checkpoints, set_checkpoints_dir
 from carcassonne.core import IllegalMove, RulesError
 from carcassonne.game.replay import load_replay, replay_states
 from carcassonne.web import views
@@ -38,9 +39,12 @@ class MoveBody(BaseModel):
     idx: int
 
 
-def create_app(replays_dir: Path) -> FastAPI:
+def create_app(replays_dir: Path, checkpoints_dir: Path | None = None) -> FastAPI:
     app = FastAPI(title="carcassonne")
     store = SessionStore(replays_dir)
+    # The agent registry is process-global; the checkpoints dir is per-app. Single
+    # uvicorn worker, so setting it here (as sessions get replays_dir) is safe.
+    set_checkpoints_dir(checkpoints_dir)
     _register_error_handlers(app)
 
     @app.get("/")
@@ -95,6 +99,12 @@ def create_app(replays_dir: Path) -> FastAPI:
         if session.terminal:
             raise NotFound(f"game {game_id} is over: no hint for a finished game")
         return views.hint_view(session.legal_cache, session.hint_annot())
+
+    @app.get("/api/checkpoints")
+    def checkpoints() -> dict[str, Any]:
+        """Available checkpoint opponents ([{id, step}]); empty if none configured.
+        The new-game dialog offers each as a ``ckpt:<id>`` opponent."""
+        return {"checkpoints": list_checkpoints()}
 
     @app.get("/api/tiledefs")
     def tiledefs() -> dict[str, Any]:

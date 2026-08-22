@@ -1008,7 +1008,7 @@ Commit: `git commit -am "feat(agents): PUCT MCTS agent guided by the network"`
 
 ---
 
-### Task 17: RL microscope wiring (hints + search panel live)
+### Task 17: RL microscope wiring (hints + search panel live) ✅ DONE (7b99764; verified end-to-end: built a throwaway checkpoint, booted `serve --checkpoints`, drove it via curl/urllib and a headless-browser walkthrough — `/api/checkpoints` lists `step_000000`, a game vs `ckpt:latest` records real MCTS annots (sims=100, bounded value, real per-move visit counts), `/hint` returns a policy summing to 1 with `top` carrying prior AND visits from a real search, and repeated hints don't perturb the trajectory; the new-game dialog shows "Checkpoint 0", the hint toggle populates the value readout from live MCTS, no console errors; unknown ckpt → 422. Design decision: the `ckpt:` prefix dispatches via a new `register_prefix` in the agent registry, and the per-app checkpoints dir is a module-global set at `create_app` (mirrors how sessions get replays_dir); `PLAY_SIMS=100` module constant, monkeypatched to 8 in tests. The hint already dispatched by opponent type via `session.hint_annot()` → `opponent.choose(annotate=True)`, so an MctsAgent opponent already yields real MCTS data — the only view change was enriching `hint_view` with `top`.)
 **Depends on:** Tasks 16, 13
 
 **Files:**
