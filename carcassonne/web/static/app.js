@@ -29,6 +29,7 @@ const S = {
   hover: null, // hovered board cell {x, y}
   aiPulse: null, // {x, y, start} settle pulse on the AI's placed tile
   drag: null,
+  error: null, // fatal fetch failure message; overrides the status line until a new game
 };
 
 // --- DOM ----------------------------------------------------------------------
@@ -85,6 +86,7 @@ async function refreshHint() {
 
 async function newGame(opponent, seat, seed) {
   const body = { opponent, human_player: seat };
+  S.error = null;
   if (seed !== null) body.seed = seed;
   const data = await postJSON("/api/games", body);
   S.gameId = data.game_id;
@@ -109,14 +111,17 @@ async function postMove(idx) {
   S.phase = "awaiting";
   S.hint = null;
   updateSidebar();
+  const gameId = S.gameId; // guard: a "New game" during this await must not stomp the new state
   let data;
   try {
-    data = await postJSON(`/api/games/${S.gameId}/move`, { idx });
+    data = await postJSON(`/api/games/${gameId}/move`, { idx });
   } catch (err) {
+    if (S.gameId !== gameId) return;
     if (err.status === 409) {
       // Stale idx: the legal list moved under us. Resync and let the human retry.
       logMeta("Move was stale — board resynced, try again");
-      const g = await api(`/api/games/${S.gameId}`);
+      const g = await api(`/api/games/${gameId}`);
+      if (S.gameId !== gameId) return;
       S.view = g.state;
       await refreshLegal();
       S.phase = S.view.terminal ? "over" : "placing";
@@ -124,8 +129,12 @@ async function postMove(idx) {
       refreshHint();
       return;
     }
-    throw err;
+    S.error = `Move failed — ${err.message || err}. Start a new game.`;
+    S.phase = "over";
+    updateSidebar();
+    return;
   }
+  if (S.gameId !== gameId) return;
   S.view = data.state;
   for (const e of data.events) logScore(e);
   if (data.ai_move && !reducedMotion.matches) {
@@ -525,7 +534,7 @@ const STATUS_TEXT = {
 };
 
 function updateSidebar() {
-  statusEl.textContent = STATUS_TEXT[S.phase];
+  statusEl.textContent = S.error ?? STATUS_TEXT[S.phase];
   updateValueReadout();
   if (!S.view) return;
   const scores = S.view.final_scores ?? S.view.scores; // end bonuses once terminal
@@ -605,7 +614,14 @@ $("dialog-start").addEventListener("click", async () => {
   const seedRaw = $("opt-seed").value.trim();
   const seed = seedRaw === "" ? null : Number(seedRaw);
   dialog.close();
-  await newGame(opponent, seat, Number.isFinite(seed) ? seed : null);
+  try {
+    await newGame(opponent, seat, Number.isFinite(seed) ? seed : null);
+  } catch (err) {
+    S.error = `Could not start the game — ${err.message || err}`;
+    S.phase = "idle";
+    updateSidebar();
+    dialog.showModal();
+  }
 });
 
 // --- hint toggle -------------------------------------------------------------------------------------------
