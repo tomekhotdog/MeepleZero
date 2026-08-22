@@ -154,30 +154,38 @@ def apply(state: GameState, move: Move) -> GameState:
             idx = idx.without_feature_meeples((q, i))
 
     # Draw the next playable tile; set aside unplaceable ones.
-    deck = list(state.deck)
-    discarded = list(state.discarded)
-    current: str | None = None
-    while deck:
-        candidate = deck.pop(0)
-        if placements_for_tile(board, TILE_TYPES[candidate]):
-            current = candidate
-            break
-        discarded.append(candidate)
+    current, deck, set_aside = draw_playable(board, state.deck)
 
     return GameState(
         board=board,
         features=idx,
-        deck=tuple(deck),
+        deck=deck,
         current_tile=current,
         current_player=1 - p,
         scores=(scores[0], scores[1]),
         meeples=(meeples[0], meeples[1]),
         abbots=(abbots[0], abbots[1]),
         abbot_at=(abbot_at[0], abbot_at[1]),
-        discarded=tuple(discarded),
+        discarded=state.discarded + set_aside,
         last_events=tuple(events),
         turn=state.turn + 1,
     )
+
+
+def draw_playable(
+    board: Board, deck: tuple[str, ...]
+) -> tuple[str | None, tuple[str, ...], tuple[str, ...]]:
+    """Draw until a playable tile appears (core-internal, not part of the public API).
+
+    Returns (drawn tile or None, remaining deck, unplaceable tiles set aside)."""
+    rest = list(deck)
+    set_aside: list[str] = []
+    while rest:
+        candidate = rest.pop(0)
+        if placements_for_tile(board, TILE_TYPES[candidate]):
+            return candidate, tuple(rest), tuple(set_aside)
+        set_aside.append(candidate)
+    return None, (), tuple(set_aside)
 
 
 _ALLOWED_ON: dict[MeepleKind, frozenset[FeatureKind]] = {
