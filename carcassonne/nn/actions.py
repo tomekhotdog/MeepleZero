@@ -136,6 +136,10 @@ def legal_mask(state: GameState) -> NDArray[np.bool_]:
     spreads tiles past 31 cells across), a few legal placements fall outside the
     window; the policy head has no slot for them, so they stay masked-out rather
     than crashing the mask. MCTS prunes those same moves (see ``agents.mcts``).
+
+    Invariant: the mask is never all-False for a non-terminal state in real play.
+    Zeroing it needs a fully-packed ~31x31 region (~961 tiles), but the base game
+    caps total placements at 72, so an in-window frontier cell always survives.
     """
     mask = np.zeros(ACTION_SPACE, dtype=np.bool_)
     origin = window_origin(state)  # hoisted: same for every move this turn (MCTS hot path)
