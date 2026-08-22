@@ -832,7 +832,7 @@ Commit: `git commit -am "feat(agents): greedy heuristic agent + evaluate arena"`
 
 *Re-read design §5 before starting this phase.*
 
-### Task 11: FastAPI backend
+### Task 11: FastAPI backend ✅ DONE (2657870; hint uses a throwaway rng so peeking never perturbs the session's agent rng stream/replay; replay filenames mirror match.py's convention with agents ["human","<opponent>"] in seat order; env fix repeated: iCloud re-hid the editable .pth — recreated .venv per lessons.md)
 **Depends on:** Task 10
 
 **Files:**
