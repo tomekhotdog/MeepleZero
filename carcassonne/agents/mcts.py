@@ -137,6 +137,23 @@ class MctsAgent:
         think_ms = int((time.perf_counter() - start) * 1000)
         return move, self._annotate(root, think_ms)
 
+    def choose_with_policy(
+        self, state: GameState, ctx: TurnContext
+    ) -> tuple[Move, Annot, dict[Move, float]]:
+        """Single search -> (chosen move, annotation, visit distribution).
+
+        The self-play primitive: one search yields the move to play, its annotation,
+        AND the normalised visit distribution used as the policy target -- so a
+        self-play game pays for exactly one search per move (not one for the move
+        and another for the target). Honours ``self_play`` (root Dirichlet noise +
+        temperature sampling) identically to :meth:`choose`; always annotates."""
+        start = time.perf_counter()
+        rng = np.random.default_rng(ctx.rng.getrandbits(64))
+        root = self._search(state, rng, add_noise=self._self_play)
+        move = root.moves[self._pick_move(root, state.turn, rng)]
+        think_ms = int((time.perf_counter() - start) * 1000)
+        return move, self._annotate(root, think_ms), self._visit_dist(root)
+
     # -- training / UI helper ----------------------------------------------
 
     def visit_policy(self, state: GameState) -> dict[Move, float]:
@@ -144,7 +161,10 @@ class MctsAgent:
         ``{move: N[i] / sum(N)}`` over legal moves -- the self-play training target
         and the ``/hint`` source. Noise-free and deterministic (search uses no
         randomness of its own), so it needs no rng."""
-        root = self._search(state, rng=None, add_noise=False)
+        return self._visit_dist(self._search(state, rng=None, add_noise=False))
+
+    @staticmethod
+    def _visit_dist(root: _Node) -> dict[Move, float]:
         total = int(root.n.sum())
         return {move: int(count) / total for move, count in zip(root.moves, root.n, strict=True)}
 
