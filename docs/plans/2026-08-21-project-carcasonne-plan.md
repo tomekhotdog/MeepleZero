@@ -979,7 +979,7 @@ Commit: `git commit -am "feat(nn): residual policy/value network + checkpoints"`
 
 ## Phase 5 — MCTS + RL microscope
 
-### Task 16: MCTS + MctsAgent
+### Task 16: MCTS + MctsAgent ✅ DONE (2e4061a; PUCT tree over immutable GameState, N/W/Q/P numpy arrays per node, backup negates per ply. Sign conventions pinned by unit tests: terminal value = +1/-1/0 from the to-move player's perspective; grounded near-terminal search finds the forced win. Determinism via a single numpy Generator seeded from ctx.rng (Dirichlet + temperature). visit_policy = normalised visit counts. Surfaced + fixed a latent encoder bug: legal_mask raised on boards that fill the 31-window (a legal placement maps one cell outside); now it masks those out and MCTS prunes them — regression-tested with a 31-wide board. STRENGTH FINDING: an *untrained*-net search does NOT beat random — measured 3/10 (sims=64). The random value head systematically discourages feature-claiming (meeples on ~6/36 turns vs random's ~14/36), and grounding only reaches the last ply or two, so MCTS lost even from near-terminal positions (~3/6). Expected "search is only as good as its value function" — the beats-random assertion was replaced with an honest end-to-end completion test + the terminal-value/grounded-win correctness tests; the strength bar moves to a trained checkpoint in Task 18+.)
 **Depends on:** Tasks 15, 10
 
 **Files:**
