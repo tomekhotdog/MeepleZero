@@ -897,7 +897,7 @@ Commit: `git commit -am "feat(web): playable canvas UI vs any agent"`
 
 ---
 
-### Task 13: Replay view
+### Task 13: Replay view ✅ DONE (37bba6b; verified with a headless-browser walkthrough: picker → step/slider/autoplay/arrow keys, search panel prior/visits bars with the played move ring-highlighted, whole-game win-prob chart with click-to-jump, error path shown in-sidebar; Play view re-verified non-regressive after factoring the shared board renderer into `static/board.js`. Real prior-vs-VISITS bars need MCTS — re-verify the visits path after Task 17; CLI `simulate` records no annots, so an annotated fixture was generated via the Play-view code path (annotate=True) for verification.)
 **Depends on:** Task 12
 
 **Files:**
