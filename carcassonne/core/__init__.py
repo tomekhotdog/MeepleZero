@@ -1,8 +1,9 @@
-"""Rules core. Public API: new_game, legal_moves, apply, is_terminal, final_scores."""
+"""Rules core. Public API: new_game, legal_moves, apply, is_terminal, final_scores,
+plus endgame_potential for heuristic agents."""
 
 from carcassonne.core.config import GameConfig
 from carcassonne.core.engine import GameState, ScoreEvent, apply, legal_moves
-from carcassonne.core.game import final_scores, is_terminal, new_game
+from carcassonne.core.game import endgame_potential, final_scores, is_terminal, new_game
 from carcassonne.core.types import (
     IllegalMove,
     MeepleKind,
@@ -29,6 +30,7 @@ __all__ = [
     "RulesError",
     "ScoreEvent",
     "apply",
+    "endgame_potential",
     "final_scores",
     "is_terminal",
     "legal_moves",

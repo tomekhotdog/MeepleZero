@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import random
+from collections.abc import Iterator
 
 from carcassonne.core.config import GameConfig
 from carcassonne.core.engine import GameState, draw_playable, neighbours8
@@ -43,13 +44,31 @@ def is_terminal(state: GameState) -> bool:
 
 
 def final_scores(state: GameState) -> tuple[int, int]:
-    """Live scores plus end-game value of every meepled feature. Pure; no events.
+    """Live scores plus end-game value of every meepled feature. Pure; no events."""
+    scores = list(state.scores)
+    for player, points in _endgame_awards(state):
+        scores[player] += points
+    return (scores[0], scores[1])
+
+
+def endgame_potential(state: GameState, player: Player) -> int:
+    """End-game points `player` would collect if the game stopped now.
+
+    Exactly `player`'s share of final_scores' end-game component: the sum of the
+    current end-game value of every incomplete feature where the player is a
+    tied-or-sole majority meeple holder (or the monastery/garden piece owner).
+    Pure; used by heuristic agents.
+    """
+    return sum(points for p, points in _endgame_awards(state) if p == player)
+
+
+def _endgame_awards(state: GameState) -> Iterator[tuple[Player, int]]:
+    """Yield each (player, points) end-game award over meepled incomplete features.
 
     Incomplete city: 1/tile + 1/shield; incomplete road: 1/tile — awarded to all
     tied majority holders. Monastery/garden with a piece: 1 + occupied
     8-neighbours, to the piece's owner.
     """
-    scores = list(state.scores)
     for d in state.features.data.values():
         if not d.meeples:
             continue
@@ -63,9 +82,7 @@ def final_scores(state: GameState) -> tuple[int, int]:
             best = max(counts.values())
             for player, c in counts.items():
                 if c == best:
-                    scores[player] += points
+                    yield player, points
         else:  # monastery / garden: exactly one tile, at most one piece
             (pos,) = d.tiles
-            points = 1 + sum(1 for q in neighbours8(pos) if q in state.board)
-            scores[d.meeples[0].player] += points
-    return (scores[0], scores[1])
+            yield d.meeples[0].player, 1 + sum(1 for q in neighbours8(pos) if q in state.board)

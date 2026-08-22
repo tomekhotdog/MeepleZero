@@ -1,4 +1,5 @@
-"""Command-line interface. `carcassonne simulate` plays agent-vs-agent games."""
+"""Command-line interface. `carcassonne simulate` plays agent-vs-agent games;
+`carcassonne evaluate` runs a seat-swapped head-to-head match and prints a table."""
 
 from __future__ import annotations
 
@@ -8,13 +9,17 @@ from collections.abc import Callable
 from pathlib import Path
 
 from carcassonne.agents import make_agent
+from carcassonne.game.arena import run_match
 from carcassonne.game.match import play_game
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
-    handlers: dict[str, Callable[[argparse.Namespace], int]] = {"simulate": _simulate}
+    handlers: dict[str, Callable[[argparse.Namespace], int]] = {
+        "simulate": _simulate,
+        "evaluate": _evaluate,
+    }
     return handlers[args.command](args)
 
 
@@ -29,6 +34,16 @@ def _build_parser() -> argparse.ArgumentParser:
     sim.add_argument("--out", type=Path, default=None, help="directory for replay files")
     sim.add_argument("--games", type=int, default=1, help="number of games (default 1)")
     sim.add_argument("--no-replay", action="store_true", help="do not write replay files")
+
+    ev = sub.add_parser("evaluate", help="head-to-head match between two agents")
+    ev.add_argument("--p0", required=True, help="agent spec for side p0 (e.g. 'greedy')")
+    ev.add_argument("--p1", required=True, help="agent spec for side p1 (e.g. 'random')")
+    ev.add_argument("--seed", type=int, required=True, help="seed of game 0; game i uses seed+i")
+    ev.add_argument("--games", type=int, default=10, help="number of games (default 10)")
+    ev.add_argument("--out", type=Path, default=None, help="directory for replay files (optional)")
+    ev.add_argument(
+        "--no-swap", action="store_true", help="p0 keeps seat 0 in every game (default: alternate)"
+    )
     return parser
 
 
@@ -63,6 +78,30 @@ def _simulate(args: argparse.Namespace) -> int:
         f"summary: p0[{agents[0].name}] wins={wins[0]}"
         f" p1[{agents[1].name}] wins={wins[1]} draws={draws}"
     )
+    return 0
+
+
+def _evaluate(args: argparse.Namespace) -> int:
+    try:
+        a, b = make_agent(args.p0), make_agent(args.p1)
+    except ValueError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+    r = run_match(a, b, args.games, args.seed, replay_dir=args.out, swap_seats=not args.no_swap)
+    # Per-game lines and the table are in (p0, p1) order; replay files record seating.
+    for i, g in enumerate(r.results):
+        line = (
+            f"game {i}: seed={args.seed + i} scores={g.final_scores}"
+            f" winner={g.winner} turns={g.turns}"
+        )
+        if g.replay_path is not None:
+            line += f" replay={g.replay_path}"
+        print(line)
+    rate = r.wins[0] / r.games if r.games else 0.0
+    print(f"result: p0[{a.name}] vs p1[{b.name}] over {r.games} games")
+    print(f"  wins: p0={r.wins[0]} p1={r.wins[1]} draws={r.draws}")
+    print(f"  mean scores: p0={r.mean_scores[0]:.1f} p1={r.mean_scores[1]:.1f}")
+    print(f"  p0 win rate: {rate:.1%}")
     return 0
 
 
