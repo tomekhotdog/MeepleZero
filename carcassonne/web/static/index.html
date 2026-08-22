@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Carcassonne</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <div id="app">
+      <main id="stage">
+        <canvas id="board"></canvas>
+        <div id="picker" role="menu" aria-label="Meeple placement"></div>
+        <div id="banner">
+          <span class="final" id="banner-scores"></span>
+          <span class="saved" id="banner-saved"></span>
+          <button id="banner-again" type="button">Play again</button>
+        </div>
+      </main>
+
+      <aside id="sidebar">
+        <div id="lens-wrap">
+          <button id="lens" type="button" aria-label="Drawn tile — click to rotate">
+            <canvas id="lens-canvas" width="128" height="128"></canvas>
+          </button>
+          <div id="lens-caption">Rotate (R)</div>
+        </div>
+
+        <div id="status">&nbsp;</div>
+
+        <div class="score-card" id="card-0">
+          <div class="who"></div>
+          <div class="points">0</div>
+          <div class="supply"></div>
+        </div>
+        <div class="score-card" id="card-1">
+          <div class="who"></div>
+          <div class="points">0</div>
+          <div class="supply"></div>
+        </div>
+
+        <div id="hint-row">
+          <span class="label" id="hint-label">Show AI's read</span>
+          <span class="switch">
+            <input type="checkbox" id="hint-toggle" aria-labelledby="hint-label" />
+            <span class="track"></span>
+          </span>
+        </div>
+        <div id="value-readout"></div>
+
+        <div id="log" aria-live="polite"></div>
+
+        <button id="new-game" type="button">New game</button>
+      </aside>
+    </div>
+
+    <dialog id="dialog">
+      <h2>New game</h2>
+      <div class="row">
+        <label for="opt-opponent">Opponent</label>
+        <select id="opt-opponent">
+          <option value="greedy" selected>Greedy</option>
+          <option value="random">Random</option>
+        </select>
+      </div>
+      <div class="row">
+        <label for="opt-seat">Seat</label>
+        <select id="opt-seat">
+          <option value="0" selected>You start</option>
+          <option value="1">AI starts</option>
+        </select>
+      </div>
+      <div class="row">
+        <label for="opt-seed">Seed (optional)</label>
+        <input id="opt-seed" type="text" inputmode="numeric" placeholder="random" />
+      </div>
+      <div class="actions">
+        <button id="dialog-cancel" type="button">Cancel</button>
+        <button id="dialog-start" type="button">Start</button>
+      </div>
+    </dialog>
+
+    <script type="module" src="/static/app.js"></script>
+  </body>
+</html>

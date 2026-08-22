@@ -15,7 +15,8 @@ from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from carcassonne.core import IllegalMove, RulesError
@@ -24,6 +25,7 @@ from carcassonne.web import views
 from carcassonne.web.sessions import NotFound, SessionStore, UnknownOpponent
 
 _REPLAY_NAME = re.compile(r"[A-Za-z0-9._-]+\.jsonl")
+_STATIC_DIR = Path(__file__).parent / "static"
 
 
 class CreateGameBody(BaseModel):
@@ -40,6 +42,10 @@ def create_app(replays_dir: Path) -> FastAPI:
     app = FastAPI(title="carcassonne")
     store = SessionStore(replays_dir)
     _register_error_handlers(app)
+
+    @app.get("/")
+    def index() -> FileResponse:
+        return FileResponse(_STATIC_DIR / "index.html")
 
     @app.get("/api/health")
     def health() -> dict[str, Any]:
@@ -108,6 +114,7 @@ def create_app(replays_dir: Path) -> FastAPI:
             "states": states,
         }
 
+    app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
     return app
 
 
