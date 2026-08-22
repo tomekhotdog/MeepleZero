@@ -102,6 +102,12 @@ def test_train_resume_continues_steps(tmp_path: Path) -> None:
     assert step_after_resume > step_after_first  # step counter carried over and advanced
     assert len(_read_metrics(reopened)) > metrics_before  # new lines appended, not clobbered
 
+    # Persisted run state survives resume: best_step points at a real checkpoint and
+    # games_generated is monotonic (so self-play seeds never repeat across resumes).
+    state = json.loads((reopened.root / "train_state.json").read_text())
+    assert (reopened.checkpoints_dir / f"step_{state['best_step']:06d}.pt").is_file()
+    assert state["games_generated"] >= 2  # one self-play game per iteration, two runs
+
 
 def test_gate_and_yardstick_contract(tmp_path: Path) -> None:
     net_a = _tiny_net()

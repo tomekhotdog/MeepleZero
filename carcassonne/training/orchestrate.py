@@ -21,12 +21,13 @@ that key: a ``"kind": "gate"`` line is an arena result; an untagged line is a
 learner step.
 
 **Resumability.** Everything reconstructs from the run directory: the buffer
-sqlite persists, checkpoints persist, and ``Learner.from_run`` restores the step.
-On resume the latest checkpoint is loaded as *both* the learning and best net (a
-pragmatic simplification -- the true historical best is recoverable from the
-gate lines if ever needed). A crash loses at most the current iteration's
-un-checkpointed steps; a clean stop (SIGINT/SIGTERM or ``should_stop``) finishes
-the current iteration, flushes a checkpoint, and returns.
+sqlite persists, checkpoints persist, ``Learner.from_run`` restores the step, and
+``train_state.json`` records the last *promoted* step and total games generated.
+On resume the learning net is the latest checkpoint but the best net is the
+promoted one from ``train_state.json`` -- so gating discipline survives restarts
+(critical on the Pi, which resumes many times). A crash loses at most the current
+iteration's un-checkpointed steps; a clean stop (SIGINT/SIGTERM or ``should_stop``)
+finishes the current iteration, flushes a checkpoint, and returns.
 
 Self-play is sequential here. Multiprocessing workers (design note) are a future
 optimisation deliberately not built now -- sequential keeps the loop, and the
@@ -158,9 +159,11 @@ def train(
             learner, best_net = _establish_nets(run, cfg, buffer, device)
             gate_cfg = MctsConfig(sims=cfg.mcts_sims)
             # order_key must strictly increase across resumes so newer games survive
-            # eviction; wall-clock ns gives that. game_counter varies self-play seeds.
+            # eviction; wall-clock ns gives that. game_counter is the total games ever
+            # generated (persisted), so self-play seeds never repeat across resumes.
             order_key = time.time_ns()
-            game_counter = buffer.n_games()
+            state = _read_state(run)
+            game_counter = state["games_generated"]
 
             for it in range(1, limit + 1):
                 if stop.is_set or (should_stop is not None and should_stop()):
@@ -183,6 +186,7 @@ def train(
                     order_key += 1
                     game_counter += 1
                 buffer.evict_to(cfg.window_games)
+                _write_state(run, games_generated=game_counter)
 
                 # -- learn (learning net) -----------------------------------
                 last: dict[str, float] = {}
@@ -222,16 +226,47 @@ def _establish_nets(
     learner = Learner.from_run(run, buffer, learner_cfg, random.Random(cfg.seed))
     if was_fresh:
         learner.checkpoint()  # persist the initial (step 0) best
+        _write_state(run, best_step=learner.step)
     best_net = _load_best_net(run, device)
     return learner, best_net
 
 
 def _load_best_net(run: TrainingRun, device: torch.device) -> CarcassonneNet:
-    latest = checkpoint.latest(run.checkpoints_dir)
-    assert latest is not None  # _establish_nets guarantees a step-0 checkpoint exists
-    net: CarcassonneNet = checkpoint.load(latest, device)["net"]
+    """Load the last *promoted* net (from train_state.json), not merely the latest
+    checkpoint -- otherwise a resume would seed self-play from an un-gated net."""
+    best_step = _read_state(run)["best_step"]
+    path = run.checkpoints_dir / f"step_{best_step:06d}.pt"
+    if not path.is_file():  # defensive: fall back to latest if the record is stale
+        latest = checkpoint.latest(run.checkpoints_dir)
+        assert latest is not None  # _establish_nets guarantees a step-0 checkpoint
+        path = latest
+    net: CarcassonneNet = checkpoint.load(path, device)["net"]
     net.eval()
     return net
+
+
+def _read_state(run: TrainingRun) -> dict[str, int]:
+    path = run.root / "train_state.json"
+    if not path.is_file():
+        return {"best_step": 0, "games_generated": 0}
+    data: dict[str, int] = json.loads(path.read_text(encoding="utf-8"))
+    return {
+        "best_step": data.get("best_step", 0),
+        "games_generated": data.get("games_generated", 0),
+    }
+
+
+def _write_state(run: TrainingRun, *, best_step: int | None = None,
+                 games_generated: int | None = None) -> None:
+    """Merge-update the persisted run state (last promoted step, total games)."""
+    state = _read_state(run)
+    if best_step is not None:
+        state["best_step"] = best_step
+    if games_generated is not None:
+        state["games_generated"] = games_generated
+    (run.root / "train_state.json").write_text(
+        json.dumps(state, separators=(",", ":")), encoding="utf-8"
+    )
 
 
 def _gate_and_maybe_promote(
@@ -253,6 +288,7 @@ def _gate_and_maybe_promote(
         learner.checkpoint()  # the new best is a real checkpoint
         best_net.load_state_dict(learner.net.state_dict())
         best_net.eval()
+        _write_state(run, best_step=learner.step)  # survives resume as the true best
     _append_gate_line(
         run,
         {
