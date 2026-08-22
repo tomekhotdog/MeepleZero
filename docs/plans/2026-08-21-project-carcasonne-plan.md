@@ -920,7 +920,7 @@ Commit: `git commit -am "feat(web): replay viewer with search panel + win-prob c
 
 *Re-read design §2 before starting this phase.*
 
-### Task 14: Encoder + ActionIndexer
+### Task 14: Encoder + ActionIndexer ✅ DONE (7b5e736; C=62 per Task-14 contract — perspective via me/opp recoloring, no separate current-player plane, superseding the plan sketch's C=63; D4 verified on a real meeple-biased mid-game state: crop-to-bbox then np.rot90 with N<-W,E<-N,S<-E,W<-S edge-side permutation)
 **Depends on:** Task 7 (independent of Phases 2–3 web work)
 
 **Files:**
