@@ -3,15 +3,29 @@
 from carcassonne.core.config import GameConfig
 from carcassonne.core.engine import GameState, ScoreEvent, apply, legal_moves
 from carcassonne.core.game import final_scores, is_terminal, new_game
-from carcassonne.core.types import IllegalMove, Move, PlaceMeeple, RetrieveAbbot, RulesError
+from carcassonne.core.types import (
+    IllegalMove,
+    MeepleKind,
+    Move,
+    PlaceMeeple,
+    Player,
+    Pos,
+    RetrieveAbbot,
+    Rotation,
+    RulesError,
+)
 
 __all__ = [
     "GameConfig",
     "GameState",
     "IllegalMove",
+    "MeepleKind",
     "Move",
     "PlaceMeeple",
+    "Player",
+    "Pos",
     "RetrieveAbbot",
+    "Rotation",
     "RulesError",
     "ScoreEvent",
     "apply",

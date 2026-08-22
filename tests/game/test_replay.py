@@ -10,6 +10,12 @@ import pytest
 
 from carcassonne.core import (
     GameConfig,
+    MeepleKind,
+    Move,
+    PlaceMeeple,
+    Pos,
+    RetrieveAbbot,
+    Rotation,
     RulesError,
     apply,
     final_scores,
@@ -17,7 +23,6 @@ from carcassonne.core import (
     legal_moves,
     new_game,
 )
-from carcassonne.core.types import MeepleKind, Move, PlaceMeeple, Pos, RetrieveAbbot, Rotation
 from carcassonne.game.replay import (
     MoveRecord,
     ReplayHeader,

@@ -8,8 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from carcassonne.core import Move, PlaceMeeple, RetrieveAbbot, RulesError
-from carcassonne.core.types import MeepleKind, Pos, Rotation
+from carcassonne.core import MeepleKind, Move, PlaceMeeple, Pos, RetrieveAbbot, Rotation, RulesError
 
 
 @dataclass(frozen=True, slots=True)

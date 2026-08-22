@@ -20,13 +20,13 @@ from carcassonne.core import (
     GameState,
     IllegalMove,
     Move,
+    Player,
     RulesError,
     apply,
     final_scores,
     is_terminal,
     new_game,
 )
-from carcassonne.core.types import Player
 from carcassonne.game.serde import (
     Annot,
     annot_from_json,
@@ -72,6 +72,8 @@ class ReplayWriter:
     leaves an incomplete file that `load_replay` refuses."""
 
     def __init__(self, path: Path, header: ReplayHeader) -> None:
+        if header.v != REPLAY_VERSION:
+            raise RulesError(f"unsupported replay version {header.v} (writer is v{REPLAY_VERSION})")
         self._file: TextIO = path.open("w", encoding="utf-8")
         self._write(
             {
