@@ -1,6 +1,6 @@
 """Command-line interface. `carcassonne simulate` plays agent-vs-agent games;
 `carcassonne evaluate` runs a seat-swapped head-to-head match and prints a table;
-`carcassonne serve` runs the web app."""
+`carcassonne serve` runs the web app; `carcassonne train` runs the AlphaZero loop."""
 
 from __future__ import annotations
 
@@ -21,6 +21,7 @@ def main(argv: list[str] | None = None) -> int:
         "simulate": _simulate,
         "evaluate": _evaluate,
         "serve": _serve,
+        "train": _train,
     }
     return handlers[args.command](args)
 
@@ -45,6 +46,23 @@ def _build_parser() -> argparse.ArgumentParser:
     ev.add_argument("--out", type=Path, default=None, help="directory for replay files (optional)")
     ev.add_argument(
         "--no-swap", action="store_true", help="p0 keeps seat 0 in every game (default: alternate)"
+    )
+
+    tr = sub.add_parser("train", help="run the resumable AlphaZero training loop")
+    tr.add_argument("--run", type=Path, required=True, help="training run directory")
+    tr.add_argument("--resume", action="store_true", help="continue an existing run")
+    tr.add_argument("--iterations", type=int, default=None, help="max iterations this invocation")
+    tr.add_argument("--sims", type=int, default=100, help="MCTS sims for self-play + gating")
+    tr.add_argument("--channels", type=int, default=64, help="network channels")
+    tr.add_argument("--n-blocks", type=int, default=5, help="residual blocks")
+    tr.add_argument("--selfplay-games", type=int, default=20, help="self-play games per iteration")
+    tr.add_argument("--learn-steps", type=int, default=40, help="gradient steps per iteration")
+    tr.add_argument("--gate-every", type=int, default=5, help="iterations between arena gates")
+    tr.add_argument("--gate-games", type=int, default=20, help="games per arena gate")
+    tr.add_argument("--window-games", type=int, default=2000, help="replay-buffer eviction window")
+    tr.add_argument("--seed", type=int, default=0, help="base seed")
+    tr.add_argument(
+        "--device", choices=["auto", "cpu"], default="auto", help="compute device (default auto)"
     )
 
     srv = sub.add_parser("serve", help="run the web app (play + replay API)")
@@ -117,6 +135,51 @@ def _evaluate(args: argparse.Namespace) -> int:
     print(f"  wins: p0={r.wins[0]} p1={r.wins[1]} draws={r.draws}")
     print(f"  mean scores: p0={r.mean_scores[0]:.1f} p1={r.mean_scores[1]:.1f}")
     print(f"  p0 win rate: {rate:.1%}")
+    return 0
+
+
+def _train(args: argparse.Namespace) -> int:
+    import torch
+
+    from carcassonne.nn.checkpoint import pick_device
+    from carcassonne.training.orchestrate import TrainConfig, run_config_dict, train
+    from carcassonne.training.run import TrainingRun
+
+    cfg = TrainConfig(
+        selfplay_games_per_iter=args.selfplay_games,
+        learn_steps_per_iter=args.learn_steps,
+        gate_every=args.gate_every,
+        gate_games=args.gate_games,
+        window_games=args.window_games,
+        mcts_sims=args.sims,
+        channels=args.channels,
+        n_blocks=args.n_blocks,
+        seed=args.seed,
+    )
+
+    run_dir: Path = args.run
+    config_exists = (run_dir / "config.json").exists()
+    if config_exists and not args.resume:
+        print(
+            f"error: run already exists at {run_dir}; pass --resume to continue it",
+            file=sys.stderr,
+        )
+        return 2
+    if args.resume and not config_exists:
+        print(f"error: no run to resume at {run_dir} (config.json missing)", file=sys.stderr)
+        return 2
+    run = TrainingRun.open(run_dir) if config_exists else TrainingRun.create(
+        run_dir, run_config_dict(cfg)
+    )
+
+    device = torch.device("cpu") if args.device == "cpu" else pick_device()
+    print(f"training run={run_dir} device={device} (Ctrl-C to stop cleanly)")
+    try:
+        train(run, cfg, device=device, max_iterations=args.iterations)
+    except KeyboardInterrupt:
+        # The signal handler set the stop flag; train() flushed a checkpoint and
+        # returned. This only fires if a second Ctrl-C races the handler removal.
+        print("\ninterrupted; latest checkpoint is intact", file=sys.stderr)
     return 0
 
 

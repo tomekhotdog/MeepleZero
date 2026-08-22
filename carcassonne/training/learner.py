@@ -149,14 +149,23 @@ class Learner:
         }
         self._append_metrics(metrics)
         if self._step % self._config.ckpt_every == 0:
-            checkpoint.save(
-                self._run.checkpoints_dir,
-                self._step,
-                self._net,
-                self._optimizer,
-                self._run.config(),
-            )
+            self.checkpoint()
         return metrics
+
+    def checkpoint(self) -> None:
+        """Persist net + optimizer + step at the current step.
+
+        Called automatically every ``ckpt_every`` steps by :meth:`train_step`, and
+        on demand by the orchestrator (initial step-0 snapshot, promotion, and the
+        clean-stop flush) so a killed run always resumes from a valid checkpoint.
+        """
+        checkpoint.save(
+            self._run.checkpoints_dir,
+            self._step,
+            self._net,
+            self._optimizer,
+            self._run.config(),
+        )
 
     def train(self, n_steps: int) -> None:
         for _ in range(n_steps):
