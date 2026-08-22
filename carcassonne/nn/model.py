@@ -99,7 +99,8 @@ class CarcassonneNet(nn.Module):
         )
         self.blocks = nn.ModuleList(_ResBlock(channels) for _ in range(n_blocks))
 
-        # Policy head: conv1x1 -> BN -> ReLU, then reshape to ACTION_SPACE.
+        # Policy head: conv1x1 -> BN, then reshape to ACTION_SPACE. No final ReLU:
+        # logits must be free to go negative so softmax can express sharp policies.
         self.policy_conv = nn.Conv2d(channels, _ACTIONS_PER_CELL, kernel_size=1, bias=False)
         self.policy_bn = nn.BatchNorm2d(_ACTIONS_PER_CELL)
 
@@ -116,9 +117,13 @@ class CarcassonneNet(nn.Module):
         for block in self.blocks:
             x = block(x)
 
-        p = torch.relu(self.policy_bn(self.policy_conv(x)))
+        p = self.policy_bn(self.policy_conv(x))
         policy_logits = _policy_head_flatten(p)
         if mask is not None:
+            # Illegal actions -> -inf so softmax gives them exactly 0. NOTE for the
+            # learner (T19): computing cross-entropy directly on these masked logits
+            # risks 0 * -inf = NaN — restrict the policy loss to legal actions / the
+            # visit-target support, do not sum over -inf entries.
             policy_logits = policy_logits.masked_fill(~mask, float("-inf"))
 
         v = torch.relu(self.value_bn(self.value_conv(x)))
