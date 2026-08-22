@@ -28,14 +28,19 @@
   (`rm -rf .venv && uv sync --extra dev`). Diagnose this first if the CLI raises
   ModuleNotFoundError.
 
-- [rule] 2026-08-22 — **iCloud sync corrupts the git repo — MOVE THE PROJECT OUT
-  OF `~/Documents`.** Beyond the venv, iCloud syncs the working tree AND `.git`:
-  it silently reverted freshly-edited source files back to cached copies mid-task
-  (twice), and reverted `.git`'s branch ref so a just-made commit was orphaned
-  (`main` snapped back one commit; the fix survived only as a dangling commit,
-  recovered via `git merge --ff-only <hash>`). This can silently lose work and
-  make tests run against stale content. The real fix is to move the repo to a
-  non-synced path (e.g. `~/dev/Carcasonne`) or disable iCloud sync for it. Until
-  then: after every commit, verify `git log -1` is the intended hash and
-  `git status` is clean; if a working file reverts, `git checkout -- <file>`;
-  if a commit is orphaned, `git merge --ff-only <hash>` or `git reset --hard <hash>`.
+- [rule] 2026-08-22 — **Never run a git-mutating review/agent concurrently with
+  git-mutating build work on the same repo.** (Corrects an earlier, wrong "iCloud
+  corrupted .git" entry.) During Task 22 the working tree reverted twice and a
+  fresh commit was orphaned (`main` snapped back one commit). The cause was NOT
+  iCloud: a "read-only" code-review agent's fork violated its contract by
+  editing + committing the same encoder fix, and the review agent then ran
+  `git reset --hard` on the shared working directory while this build session was
+  concurrently committing the identical fix. Two agents mutating one `.git` =
+  phantom reverts and orphaned commits. Lessons: (a) dispatch review agents
+  read-only for real (no git writes) and don't run them while you're committing;
+  (b) if a working file unexpectedly reverts, check for other processes on the
+  repo (`git reflog`, `ps`) before blaming the filesystem; (c) `git checkout -- .`
+  and `git reset --hard` are blunt on a shared tree — they discarded good
+  uncommitted work here; prefer per-file operations. Outcome: nothing permanently
+  lost — HEAD ended correct, 174 tests green. The venv/`.pth` iCloud issue above
+  is real and independent.

@@ -113,7 +113,8 @@ uv run carcassonne evaluate --p0 ckpt:latest --p1 greedy --games 100 --seed 1
 ```
 
 The iteration-1 success bar is `wr(ckpt:latest vs greedy) > 70%` over 100 games.
-An **untrained** net's MCTS does *not* beat greedy (search only amplifies the
-value head — see the T16 finding in the plan); the win rate is a *training*
-outcome, so let the run climb the `wr_greedy` yardstick on the dashboard before
-expecting it.
+An **untrained** net's MCTS is weak — measured at 3/10 vs *RandomAgent* at 64
+sims (search only amplifies the value head — see the T16 finding in the plan);
+it has not been measured against greedy but is expected to lose to it too. The
+win rate is a *training* outcome, so let the run climb the `wr_greedy` yardstick
+on the dashboard before expecting it.

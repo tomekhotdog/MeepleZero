@@ -36,13 +36,15 @@ file format.
 
 ## Training
 
-- Single-machine loop via `train` CLI: multiprocess self-play → on-disk replay
+- Single-machine loop via `train` CLI: sequential self-play → on-disk replay
   buffer → learner (policy CE + value MSE) → **Arena** gating (promote candidate
-  on >55% vs current best; GreedyAgent as absolute yardstick).
+  on >55% vs current best; GreedyAgent as absolute yardstick). (Self-play is
+  sequential in iteration 1; a multiprocess worker pool is a planned follow-up.)
 - A **TrainingRun** is a directory (config, checkpoints, replays, buffer,
   metrics); fully resumable with `--resume` — required for multi-day runs on a
-  Raspberry Pi 5. Development/prove-out on Apple Silicon (MPS); training on Pi
-  (CPU). Network sized for Pi inference (small residual CNN).
+  Raspberry Pi 5. Development/prove-out is CPU-only on this Intel Mac (no MPS —
+  Apple-Silicon only); training on the Pi (aarch64 CPU). Network sized for Pi
+  inference (small residual CNN).
 
 ## Web app — the RL microscope
 

@@ -1,7 +1,9 @@
 # Features — ProjectCarcasonne
 
-High-level user journeys. Status: all **planned** (design approved 2026-08-21,
-no implementation yet).
+High-level user journeys. Status: all **implemented** (iteration 1 complete,
+2026-08-22; 174 tests green). Two success criteria are runtime outcomes rather
+than code — training an agent to beat greedy >70%, and a multi-day run on the
+Pi — see `docs/plans/2026-08-22-iteration1-verification.md`.
 
 ## 1. Simulate a game (CLI)
 
