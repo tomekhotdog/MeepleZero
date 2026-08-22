@@ -96,6 +96,14 @@ def _decode_action(a: int) -> TurnAction:
     raise RulesError(f"action sub-index {a} out of range")
 
 
+def _encode_with_origin(move: Move, origin: tuple[int, int]) -> int:
+    wx, wy = move.pos.x - origin[0], move.pos.y - origin[1]
+    if not (0 <= wx < WINDOW and 0 <= wy < WINDOW):
+        raise RulesError(f"move at {move.pos} maps outside the {WINDOW}x{WINDOW} window")
+    a = _action_index(move.action)
+    return ((wy * WINDOW + wx) * _ROTS + int(move.rotation)) * _ACTIONS + a
+
+
 def encode_move(state: GameState, move: Move) -> int:
     """``Move`` -> action id in ``[0, ACTION_SPACE)``.
 
@@ -103,11 +111,7 @@ def encode_move(state: GameState, move: Move) -> int:
     (impossible for legal moves on a base-game board; surfaced loudly if it ever
     happens).
     """
-    wx, wy = to_window(state, move.pos)
-    if not (0 <= wx < WINDOW and 0 <= wy < WINDOW):
-        raise RulesError(f"move at {move.pos} maps outside the {WINDOW}x{WINDOW} window")
-    a = _action_index(move.action)
-    return ((wy * WINDOW + wx) * _ROTS + int(move.rotation)) * _ACTIONS + a
+    return _encode_with_origin(move, window_origin(state))
 
 
 def decode_move(state: GameState, idx: int) -> Move:
@@ -126,6 +130,7 @@ def decode_move(state: GameState, idx: int) -> Move:
 def legal_mask(state: GameState) -> NDArray[np.bool_]:
     """Boolean mask of shape ``(ACTION_SPACE,)``, True exactly at legal move ids."""
     mask = np.zeros(ACTION_SPACE, dtype=np.bool_)
+    origin = window_origin(state)  # hoisted: same for every move this turn (MCTS hot path)
     for move in legal_moves(state):
-        mask[encode_move(state, move)] = True
+        mask[_encode_with_origin(move, origin)] = True
     return mask

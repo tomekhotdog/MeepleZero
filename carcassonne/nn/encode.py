@@ -109,17 +109,18 @@ def encode_state(state: GameState) -> NDArray[np.float32]:
             occupied_n = sum(1 for q in neighbours8(pos) if q in board)
             planes[_MONFILL, wy, wx] = occupied_n / 8.0
 
+    # Every position here belongs to a placed tile, already proven in-window by the
+    # loop above, so out-of-window here is a real bug — assert rather than skip.
     for d in state.features.data.values():
         if d.kind in (FeatureKind.CITY, FeatureKind.ROAD) and d.open_edges == 0:
             for tp in d.tiles:
                 wx, wy = tp.x - ox, tp.y - oy
-                if 0 <= wx < b and 0 <= wy < b:
-                    planes[_COMPLETED, wy, wx] = 1.0
+                assert 0 <= wx < b and 0 <= wy < b
+                planes[_COMPLETED, wy, wx] = 1.0
         for m in d.meeples:
             mpos, _feat = m.node
             wx, wy = mpos.x - ox, mpos.y - oy
-            if not (0 <= wx < b and 0 <= wy < b):
-                continue
+            assert 0 <= wx < b and 0 <= wy < b
             if m.kind is MeepleKind.MEEPLE:
                 plane = _MEEPLE_ME if m.player == me else _MEEPLE_OPP
             else:
