@@ -271,21 +271,59 @@ def _split_metrics(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]
     return {"learn": learn, "gate": gate}
 
 
+def _tail_lines(path: Path, max_bytes: int = 64_000) -> list[str]:
+    """Read only the last ``max_bytes`` of a file as decoded lines.
+
+    metrics.jsonl grows one line per learner step, so the picker must not read the
+    whole file per run (see _list_replays for the same tail-only discipline). We
+    seek to the end rather than reading the whole file into memory."""
+    with path.open("rb") as fh:
+        fh.seek(0, 2)  # end
+        size = fh.tell()
+        fh.seek(max(0, size - max_bytes))
+        chunk = fh.read()
+    text = chunk.decode("utf-8", errors="ignore")
+    return text.splitlines()[1:] if size > max_bytes else text.splitlines()
+
+
+def _last_metrics(
+    metrics_path: Path,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """Return (last learner row, last gate row) reading only the file's tail."""
+    if not metrics_path.is_file():
+        return None, None
+    last_learn: dict[str, Any] | None = None
+    last_gate: dict[str, Any] | None = None
+    for line in _tail_lines(metrics_path):
+        if not line.strip():
+            continue
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(obj, dict):
+            continue
+        if obj.get("kind") == "gate":
+            last_gate = obj
+        elif "step" in obj:
+            last_learn = obj
+    return last_learn, last_gate
+
+
 def _run_summary(path: Path) -> dict[str, Any]:
-    rows = _read_metrics(TrainingRun(path).metrics_path)
-    series = _split_metrics(rows)
-    last_step = series["learn"][-1]["step"] if series["learn"] else None
-    last_gate = series["gate"][-1] if series["gate"] else None
-    checkpoints = _checkpoint_steps(TrainingRun(path).checkpoints_dir)
+    run = TrainingRun.open(path)
+    last_learn, last_gate = _last_metrics(run.metrics_path)
+    last_step = last_learn["step"] if last_learn else None
+    n_checkpoints = len(_checkpoint_steps(run.checkpoints_dir))
     # A single "how far has this run got" number for the picker line.
     iterations_or_steps = last_step
     if iterations_or_steps is None and last_gate is not None:
         iterations_or_steps = last_gate.get("iter")
     return {
         "name": path.name,
-        "config": TrainingRun.open(path).config(),
+        "config": run.config(),
         "iterations_or_steps": iterations_or_steps,
-        "n_checkpoints": len(checkpoints),
+        "n_checkpoints": n_checkpoints,
         "last_step": last_step,
         "last_gate": last_gate,
     }
