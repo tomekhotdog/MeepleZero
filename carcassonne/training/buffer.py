@@ -101,22 +101,29 @@ class ReplayBuffer:
 
     def sample(self, batch_size: int, rng: random.Random) -> list[SampledExample]:
         """Uniformly sample ``batch_size`` examples (with replacement). Deterministic
-        for a given ``rng`` and buffer contents (rows read in a stable order)."""
-        rows = self._conn.execute(
-            "SELECT game_id, move_n, policy, value FROM examples ORDER BY game_id, move_n"
-        ).fetchall()
-        if not rows:
+        for a given ``rng`` and buffer contents.
+
+        Scans only the (cheap, integer) rowid list to pick the batch, then reads and
+        JSON-parses just the ``batch_size`` chosen rows — O(batch) heavy work per call
+        rather than materialising the whole table (the learner samples every step)."""
+        rowids = [r[0] for r in self._conn.execute("SELECT rowid FROM examples ORDER BY rowid")]
+        if not rowids:
             raise ValueError("cannot sample from an empty replay buffer")
-        chosen = rng.choices(rows, k=batch_size)
-        return [
-            SampledExample(
-                game_id=row[0],
-                move_n=int(row[1]),
-                policy=_policy_from_json(row[2]),
-                value=float(row[3]),
+        chosen = rng.choices(rowids, k=batch_size)
+        out: list[SampledExample] = []
+        for rid in chosen:
+            game_id, move_n, policy, value = self._conn.execute(
+                "SELECT game_id, move_n, policy, value FROM examples WHERE rowid = ?", (rid,)
+            ).fetchone()
+            out.append(
+                SampledExample(
+                    game_id=game_id,
+                    move_n=int(move_n),
+                    policy=_policy_from_json(policy),
+                    value=float(value),
+                )
             )
-            for row in chosen
-        ]
+        return out
 
     def state_for(self, game_id: str, move_n: int) -> GameState:
         """The ``GameState`` *before* move ``move_n`` of ``game_id``, re-derived by
