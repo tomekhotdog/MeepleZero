@@ -1031,7 +1031,7 @@ Commit: `git commit -am "feat(web): live MCTS hints — the RL microscope"`
 
 *Re-read design §3 before starting this phase.*
 
-### Task 18: Self-play worker + ReplayBuffer
+### Task 18: Self-play worker + ReplayBuffer ✅ DONE (a7ddad7; TrainingRun dir layout (create/open, refuses to clobber); sqlite ReplayBuffer storing TARGETS not states (policy = sparse {action_id: prob}, value = ±1/0 from the position's mover's perspective) with states re-derived on demand via replay_states + a size-64 LRU on decoded games; order_key-based window eviction; deterministic sampling with an injected random.Random. Self-play worker plays MctsAgent-vs-itself, ONE search per move via a new MctsAgent.choose_with_policy (move + annot + visit dist from a single tree; choose/visit_policy still work, sharing _visit_dist). Value-sign pinned to _terminal_value's convention and asserted against the replay winner. Perf guard honoured: ONE real tiny self-play game in tests (channels=8, n_blocks=1, sims=4); everything else synthetic. Full suite 145 passed; ruff + mypy strict clean.)
 **Depends on:** Tasks 16, 8
 
 **Files:**
