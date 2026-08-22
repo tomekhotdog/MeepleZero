@@ -740,7 +740,7 @@ value on first green run; guards future refactors).
 
 ## Phase 2 — Replay, agents, CLI
 
-### Task 8: Replay format (writer/loader)
+### Task 8: Replay format (writer/loader) ✅ DONE (9de967c; Annot lives in game/serde.py; drive-along: core `_neighbours8` → `neighbours8`, still unexported)
 **Depends on:** Task 7
 
 **Files:**
