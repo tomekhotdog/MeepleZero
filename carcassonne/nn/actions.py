@@ -128,9 +128,20 @@ def decode_move(state: GameState, idx: int) -> Move:
 
 
 def legal_mask(state: GameState) -> NDArray[np.bool_]:
-    """Boolean mask of shape ``(ACTION_SPACE,)``, True exactly at legal move ids."""
+    """Boolean mask of shape ``(ACTION_SPACE,)``, True at every legal move id that
+    fits the window.
+
+    On base-game boards every legal move fits, so the mask marks exactly the legal
+    set. On boards wider than ``WINDOW`` (reachable when a search or a long game
+    spreads tiles past 31 cells across), a few legal placements fall outside the
+    window; the policy head has no slot for them, so they stay masked-out rather
+    than crashing the mask. MCTS prunes those same moves (see ``agents.mcts``).
+    """
     mask = np.zeros(ACTION_SPACE, dtype=np.bool_)
     origin = window_origin(state)  # hoisted: same for every move this turn (MCTS hot path)
     for move in legal_moves(state):
-        mask[_encode_with_origin(move, origin)] = True
+        try:
+            mask[_encode_with_origin(move, origin)] = True
+        except RulesError:
+            continue  # move maps outside the window; unrepresentable, leave masked-out
     return mask
