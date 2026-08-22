@@ -224,3 +224,56 @@ def test_unknown_replay_is_404(client: TestClient) -> None:
     r = client.get("/api/replays/nope.jsonl")
     assert r.status_code == 404
     assert r.json()["error"]
+
+
+# --- review-fix regression tests -------------------------------------------
+
+
+def test_hints_do_not_perturb_the_game_trajectory(client: TestClient) -> None:
+    """Peeking at hints must never change how the AI subsequently plays.
+
+    Two same-seed games vs greedy, one spammed with hints, must stay identical."""
+
+    def create(seed: int) -> str:
+        r = client.post("/api/games", json={"opponent": "greedy", "human_player": 0, "seed": seed})
+        assert r.status_code == 200
+        game_id: str = r.json()["game_id"]
+        return game_id
+
+    hinted, clean = create(99), create(99)
+    for _ in range(12):  # enough turns for divergence to show if hints leaked rng
+        for _ in range(3):
+            assert client.get(f"/api/games/{hinted}/hint").status_code == 200
+        moved_h = client.post(f"/api/games/{hinted}/move", json={"idx": 0}).json()
+        moved_c = client.post(f"/api/games/{clean}/move", json={"idx": 0}).json()
+        # compare the moves themselves, not annots (think_ms is wall-clock)
+        assert (moved_h["ai_move"] or {}).get("move") == (moved_c["ai_move"] or {}).get("move")
+        assert moved_h["state"]["scores"] == moved_c["state"]["scores"]
+        if moved_h["state"]["terminal"]:
+            break
+
+
+def test_meeple_appears_in_state_view(client: TestClient) -> None:
+    r = client.post("/api/games", json={"opponent": "random", "human_player": 0, "seed": 3})
+    game_id = r.json()["game_id"]
+    legal = client.get(f"/api/games/{game_id}/legal").json()["moves"]
+    idx = next(i for i, m in enumerate(legal) if (m["action"] or {}).get("type") == "meeple")
+    chosen = legal[idx]
+    state = client.post(f"/api/games/{game_id}/move", json={"idx": idx}).json()["state"]
+    placed = next(t for t in state["tiles"] if t["x"] == chosen["x"] and t["y"] == chosen["y"])
+    assert {"player": 0, "kind": "meeple", "feature": chosen["action"]["feature"]} in placed[
+        "meeples"
+    ]
+
+
+def test_session_store_evicts_and_closes_abandoned_writers(tmp_path: Path) -> None:
+    from carcassonne.web.sessions import _MAX_SESSIONS, SessionStore
+
+    store = SessionStore(replays_dir=tmp_path)
+    ids = [store.create("random", 0, seed).id for seed in range(_MAX_SESSIONS + 3)]
+    assert len(store._sessions) <= _MAX_SESSIONS
+    # evicted sessions are gone and their replay files exist as crash artifacts
+    evicted = [gid for gid in ids if gid not in store._sessions]
+    assert evicted
+    artifacts = list(tmp_path.glob("*.jsonl"))
+    assert len(artifacts) == len(ids)  # every session wrote its header line

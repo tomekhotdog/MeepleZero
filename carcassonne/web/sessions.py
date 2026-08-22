@@ -99,12 +99,32 @@ class Session:
         return self.state.last_events
 
 
+_MAX_SESSIONS = 32  # local single-user tool; evict oldest beyond this
+
+
 @dataclass
 class SessionStore:
     replays_dir: Path
     _sessions: dict[str, Session] = field(default_factory=dict)
 
+    def _evict_for_capacity(self) -> None:
+        """Keep the store bounded: drop finished sessions first, then the oldest.
+
+        An abandoned mid-game session holds an open ReplayWriter; closing it via
+        the context-manager path leaves a crash artifact that load_replay refuses,
+        which is the correct record of an unfinished game."""
+        while len(self._sessions) >= _MAX_SESSIONS:
+            victim_id = next(
+                (sid for sid, s in self._sessions.items() if s.writer is None),
+                next(iter(self._sessions)),  # dicts preserve insertion order: oldest first
+            )
+            victim = self._sessions.pop(victim_id)
+            if victim.writer is not None:
+                victim.writer.__exit__(None, None, None)
+                victim.writer = None
+
     def create(self, opponent_spec: str, human_player: int, seed: int) -> Session:
+        self._evict_for_capacity()
         try:
             opponent = make_agent(opponent_spec)
         except ValueError as e:
