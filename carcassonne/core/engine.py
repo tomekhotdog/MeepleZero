@@ -103,7 +103,7 @@ def apply(state: GameState, move: Move) -> GameState:
         if home is None:
             raise IllegalMove("no abbot on the board")
         d = idx.root_data(home)
-        points = 1 + sum(1 for q in _neighbours8(home[0]) if q in board)
+        points = 1 + sum(1 for q in neighbours8(home[0]) if q in board)
         events.append(ScoreEvent(p, points, d.kind, d.tiles))
         scores[p] += points
         idx = idx.without_feature_meeples(idx.find(home))
@@ -133,9 +133,9 @@ def apply(state: GameState, move: Move) -> GameState:
 
     # Monastery/garden sweep: any occupied one in the 3x3 around the new tile
     # that is now fully surrounded scores 9 and returns its piece.
-    for q in sorted(_neighbours8(move.pos) + (move.pos,)):
+    for q in sorted(neighbours8(move.pos) + (move.pos,)):
         placed = board.get(q)
-        if placed is None or any(nq not in board for nq in _neighbours8(q)):
+        if placed is None or any(nq not in board for nq in neighbours8(q)):
             continue
         for i, f in enumerate(TILE_TYPES[placed.type_id].features):
             if f.kind not in (FeatureKind.MONASTERY, FeatureKind.GARDEN):
@@ -227,7 +227,7 @@ def _score_value(d: FeatureData) -> int:
     return len(d.tiles)  # road
 
 
-def _neighbours8(pos: Pos) -> tuple[Pos, ...]:
+def neighbours8(pos: Pos) -> tuple[Pos, ...]:
     return tuple(
         Pos(pos.x + dx, pos.y + dy)
         for dx in (-1, 0, 1)

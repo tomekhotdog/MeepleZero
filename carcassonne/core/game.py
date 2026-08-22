@@ -3,7 +3,7 @@ from __future__ import annotations
 import random
 
 from carcassonne.core.config import GameConfig
-from carcassonne.core.engine import GameState, _neighbours8, draw_playable
+from carcassonne.core.engine import GameState, draw_playable, neighbours8
 from carcassonne.core.features import FeatureIndex
 from carcassonne.core.state import empty_board_with_start
 from carcassonne.core.tiles import DECK, START_TILE_ID
@@ -66,6 +66,6 @@ def final_scores(state: GameState) -> tuple[int, int]:
                     scores[player] += points
         else:  # monastery / garden: exactly one tile, at most one piece
             (pos,) = d.tiles
-            points = 1 + sum(1 for q in _neighbours8(pos) if q in state.board)
+            points = 1 + sum(1 for q in neighbours8(pos) if q in state.board)
             scores[d.meeples[0].player] += points
     return (scores[0], scores[1])
