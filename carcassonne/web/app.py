@@ -22,10 +22,16 @@ from pydantic import BaseModel
 from carcassonne.agents import list_checkpoints, set_checkpoints_dir
 from carcassonne.core import IllegalMove, RulesError
 from carcassonne.game.replay import load_replay, replay_states
+from carcassonne.training.run import TrainingRun
 from carcassonne.web import views
 from carcassonne.web.sessions import NotFound, SessionStore, UnknownOpponent
 
 _REPLAY_NAME = re.compile(r"[A-Za-z0-9._-]+\.jsonl")
+# A run name is a directory basename: a leading dot is disallowed so "." and
+# ".." can never match, and no path separators are permitted -- traversal-safe.
+_RUN_NAME = re.compile(r"[A-Za-z0-9_-][A-Za-z0-9._-]*")
+_CKPT_PREFIX = "step_"
+_CKPT_SUFFIX = ".pt"
 _STATIC_DIR = Path(__file__).parent / "static"
 
 
@@ -39,7 +45,11 @@ class MoveBody(BaseModel):
     idx: int
 
 
-def create_app(replays_dir: Path, checkpoints_dir: Path | None = None) -> FastAPI:
+def create_app(
+    replays_dir: Path,
+    checkpoints_dir: Path | None = None,
+    runs_dir: Path | None = None,
+) -> FastAPI:
     app = FastAPI(title="carcassonne")
     store = SessionStore(replays_dir)
     # The agent registry is process-global; the checkpoints dir is per-app. Single
@@ -54,6 +64,10 @@ def create_app(replays_dir: Path, checkpoints_dir: Path | None = None) -> FastAP
     @app.get("/replay")
     def replay_page() -> FileResponse:
         return FileResponse(_STATIC_DIR / "replay.html")
+
+    @app.get("/training")
+    def training_page() -> FileResponse:
+        return FileResponse(_STATIC_DIR / "training.html")
 
     @app.get("/api/health")
     def health() -> dict[str, Any]:
@@ -128,6 +142,18 @@ def create_app(replays_dir: Path, checkpoints_dir: Path | None = None) -> FastAP
             "states": states,
         }
 
+    @app.get("/api/runs")
+    def list_runs() -> dict[str, Any]:
+        """Summaries of every TrainingRun under ``runs_dir`` (dirs with a
+        config.json). Cheap: config + a checkpoint count + the last metric lines."""
+        return {"runs": _list_runs(runs_dir)}
+
+    @app.get("/api/runs/{name}")
+    def get_run(name: str) -> dict[str, Any]:
+        """Full detail for one run: config, checkpoint timeline, and the two
+        metric series (learner steps + arena gates) split apart."""
+        return _run_detail(_run_dir(runs_dir, name))
+
     app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
     return app
 
@@ -179,3 +205,102 @@ def _replay_file(replays_dir: Path, name: str) -> Path:
     if _REPLAY_NAME.fullmatch(name) is None or not path.is_file():
         raise NotFound(f"no such replay: {name}")
     return path
+
+
+# --- training runs ---------------------------------------------------------
+
+
+def _is_run_dir(path: Path) -> bool:
+    return path.is_dir() and (path / "config.json").is_file()
+
+
+def _run_dir(runs_dir: Path | None, name: str) -> Path:
+    """Resolve a run name to its directory, or raise ``NotFound``.
+
+    The name regex forbids separators and a leading dot, so ``..`` and absolute
+    paths can never match -- the join stays inside ``runs_dir``."""
+    if runs_dir is None or _RUN_NAME.fullmatch(name) is None:
+        raise NotFound(f"no such training run: {name}")
+    path = runs_dir / name
+    if not _is_run_dir(path):
+        raise NotFound(f"no such training run: {name}")
+    return path
+
+
+def _checkpoint_steps(checkpoints_dir: Path) -> list[dict[str, Any]]:
+    """Checkpoint timeline: ``[{step, file}]`` sorted ascending by step."""
+    out: list[dict[str, Any]] = []
+    if checkpoints_dir.is_dir():
+        for path in checkpoints_dir.glob(f"{_CKPT_PREFIX}*{_CKPT_SUFFIX}"):
+            try:
+                step = int(path.stem[len(_CKPT_PREFIX) :])
+            except ValueError:
+                continue  # a stray file that isn't a real checkpoint
+            out.append({"step": step, "file": path.name})
+    out.sort(key=lambda c: c["step"])
+    return out
+
+
+def _read_metrics(metrics_path: Path) -> list[dict[str, Any]]:
+    """Parse ``metrics.jsonl`` into a list of dicts; skip blank/garbled lines
+    (a killed learner can leave a half-written final line)."""
+    if not metrics_path.is_file():
+        return []
+    out: list[dict[str, Any]] = []
+    for line in metrics_path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(obj, dict):
+            out.append(obj)
+    return out
+
+
+def _split_metrics(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    """Split raw metric rows into the two series the dashboard charts.
+
+    A ``"kind": "gate"`` row is an arena result (orchestrator); any other row is
+    an untagged learner step. See training/orchestrate.py's metrics-tagging note."""
+    learn: list[dict[str, Any]] = []
+    gate: list[dict[str, Any]] = []
+    for row in rows:
+        (gate if row.get("kind") == "gate" else learn).append(row)
+    return {"learn": learn, "gate": gate}
+
+
+def _run_summary(path: Path) -> dict[str, Any]:
+    rows = _read_metrics(TrainingRun(path).metrics_path)
+    series = _split_metrics(rows)
+    last_step = series["learn"][-1]["step"] if series["learn"] else None
+    last_gate = series["gate"][-1] if series["gate"] else None
+    checkpoints = _checkpoint_steps(TrainingRun(path).checkpoints_dir)
+    # A single "how far has this run got" number for the picker line.
+    iterations_or_steps = last_step
+    if iterations_or_steps is None and last_gate is not None:
+        iterations_or_steps = last_gate.get("iter")
+    return {
+        "name": path.name,
+        "config": TrainingRun.open(path).config(),
+        "iterations_or_steps": iterations_or_steps,
+        "n_checkpoints": len(checkpoints),
+        "last_step": last_step,
+        "last_gate": last_gate,
+    }
+
+
+def _list_runs(runs_dir: Path | None) -> list[dict[str, Any]]:
+    if runs_dir is None or not runs_dir.is_dir():
+        return []
+    return [_run_summary(p) for p in sorted(runs_dir.iterdir()) if _is_run_dir(p)]
+
+
+def _run_detail(path: Path) -> dict[str, Any]:
+    run = TrainingRun.open(path)
+    return {
+        "config": run.config(),
+        "checkpoints": _checkpoint_steps(run.checkpoints_dir),
+        "metrics": _split_metrics(_read_metrics(run.metrics_path)),
+    }

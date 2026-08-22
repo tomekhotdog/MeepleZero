@@ -1113,7 +1113,7 @@ Commit: `git commit -am "feat(training): arena gating + resumable train orchestr
 
 ---
 
-### Task 21: Training view
+### Task 21: Training view ✅ DONE (ac0f3fa; metrics parser splits untagged learner steps from kind=="gate" arena lines per the real learner.py/orchestrate.py schema; four canvas charts with no library — loss curves, arena win-rate with the 0.55 gate line + promoted dots, buffer-games growth, checkpoint timeline; 10s polling paused on hidden tab; run-name regex forbids leading dot + separators for traversal safety; verified end-to-end against a real `train` run via curl)
 **Depends on:** Tasks 20, 13
 
 **Files:**

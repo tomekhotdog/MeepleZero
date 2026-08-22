@@ -47,10 +47,12 @@ def test_replay_page_served(client: TestClient) -> None:
         ("app.js", "javascript"),
         ("board.js", "javascript"),
         ("replay.js", "javascript"),
+        ("training.js", "javascript"),
         ("tiles.js", "javascript"),
         ("style.css", "text/css"),
         ("index.html", "text/html"),
         ("replay.html", "text/html"),
+        ("training.html", "text/html"),
     ],
 )
 def test_static_assets_served(client: TestClient, name: str, content_type: str) -> None:
@@ -59,7 +61,7 @@ def test_static_assets_served(client: TestClient, name: str, content_type: str) 
     assert content_type in r.headers["content-type"]
 
 
-@pytest.mark.parametrize("page", ["index.html", "replay.html"])
+@pytest.mark.parametrize("page", ["index.html", "replay.html", "training.html"])
 def test_page_references_only_existing_files(page: str) -> None:
     html = (STATIC_DIR / page).read_text(encoding="utf-8")
     refs = re.findall(r'(?:src|href)="([^"]+)"', html)
@@ -71,7 +73,7 @@ def test_page_references_only_existing_files(page: str) -> None:
         assert (STATIC_DIR / ref.removeprefix("/static/")).is_file(), f"missing: {ref}"
 
 
-@pytest.mark.parametrize("name", ["app.js", "board.js", "replay.js", "tiles.js"])
+@pytest.mark.parametrize("name", ["app.js", "board.js", "replay.js", "training.js", "tiles.js"])
 def test_js_syntax(name: str, tmp_path: Path) -> None:
     node = shutil.which("node")
     if node is None:

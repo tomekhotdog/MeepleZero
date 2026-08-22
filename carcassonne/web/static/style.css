@@ -672,6 +672,113 @@ dialog .actions {
   cursor: pointer;
 }
 
+/* --- training view --------------------------------------------------------- */
+
+.training-stage {
+  overflow-y: auto; /* the charts column scrolls; the page itself never does */
+  padding: 18px;
+}
+
+#charts[hidden] {
+  display: none;
+}
+
+.chart-card {
+  background: var(--stage-raised);
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  padding: 12px 14px;
+  margin-bottom: 16px;
+}
+
+.chart-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.chart-head .panel-title {
+  margin-bottom: 0;
+}
+
+.chart-card canvas {
+  display: block;
+  width: 100%;
+  height: 200px;
+}
+
+#ckpt-chart {
+  height: 64px;
+}
+
+.chart-axis {
+  font-size: 10px;
+  margin-top: 6px;
+}
+
+.legend {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--bone-dim);
+}
+
+.legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.legend-dot {
+  display: inline-block;
+  width: 10px;
+  height: 3px;
+  border-radius: 1px;
+}
+
+.training-sidebar .panel {
+  background: var(--stage);
+  border: 1px solid var(--hairline);
+  border-radius: 4px;
+  padding: 10px 12px;
+}
+
+.training-sidebar .panel[hidden] {
+  display: none;
+}
+
+.training-sidebar select {
+  width: 100%;
+  background: var(--stage-raised);
+  color: var(--bone);
+  border: 1px solid var(--hairline);
+  border-radius: 4px;
+  padding: 6px 8px;
+  font-family: var(--ui);
+  font-size: 12px;
+}
+
+.kv {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 11px;
+  line-height: 1.9;
+}
+
+.kv-k {
+  color: var(--bone-dim);
+}
+
+.kv-v {
+  color: var(--bone);
+}
+
 /* --- motion ---------------------------------------------------------------- */
 
 @media (prefers-reduced-motion: reduce) {

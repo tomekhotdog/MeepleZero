@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Carcassonne — training</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <div id="app" class="training">
+      <main id="stage" class="training-stage">
+        <div id="empty-hint">Pick a training run to watch it learn.</div>
+
+        <div id="charts" hidden>
+          <!-- (1) Loss curves -->
+          <section class="chart-card">
+            <div class="chart-head">
+              <span class="panel-title">Loss vs step</span>
+              <span class="legend" id="loss-legend"></span>
+            </div>
+            <canvas id="loss-chart" aria-label="Training loss curves"></canvas>
+            <div class="chart-axis mono muted" id="loss-axis"></div>
+          </section>
+
+          <!-- (2) Arena win-rates -->
+          <section class="chart-card">
+            <div class="chart-head">
+              <span class="panel-title">Arena win-rate vs gate</span>
+              <span class="legend" id="arena-legend"></span>
+            </div>
+            <canvas id="arena-chart" aria-label="Arena win-rates across gates"></canvas>
+            <div class="chart-axis mono muted" id="arena-axis"></div>
+          </section>
+
+          <!-- (3) Games generated -->
+          <section class="chart-card">
+            <div class="chart-head">
+              <span class="panel-title">Buffer games vs step</span>
+            </div>
+            <canvas id="games-chart" aria-label="Buffer games over training"></canvas>
+            <div class="chart-axis mono muted" id="games-axis"></div>
+          </section>
+
+          <!-- (4) Checkpoint timeline -->
+          <section class="chart-card">
+            <div class="chart-head">
+              <span class="panel-title">Checkpoint timeline</span>
+              <span class="legend" id="ckpt-legend"></span>
+            </div>
+            <canvas id="ckpt-chart" aria-label="Checkpoint timeline"></canvas>
+            <div class="chart-axis mono muted" id="ckpt-axis"></div>
+          </section>
+        </div>
+      </main>
+
+      <aside id="sidebar" class="training-sidebar">
+        <div class="panel">
+          <label class="panel-title" for="run-select">Training run</label>
+          <select id="run-select" aria-label="Choose a training run">
+            <option value="">Loading…</option>
+          </select>
+          <div id="run-error" class="error" role="alert"></div>
+        </div>
+
+        <div class="panel" id="summary-panel" hidden>
+          <div class="panel-title">Summary</div>
+          <div id="summary-body" class="mono"></div>
+        </div>
+
+        <div class="panel" id="config-panel" hidden>
+          <div class="panel-title">Config</div>
+          <div id="config-body" class="mono muted"></div>
+        </div>
+
+        <div class="panel" id="live-panel" hidden>
+          <div class="panel-title">Live</div>
+          <div id="updated" class="mono muted"></div>
+        </div>
+      </aside>
+    </div>
+
+    <script type="module" src="/static/training.js"></script>
+  </body>
+</html>
