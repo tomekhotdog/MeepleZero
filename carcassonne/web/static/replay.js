@@ -10,7 +10,6 @@
 
 import { resizeToDisplay, drawTiles, drawFrontier, cellPx, screenToCellFloat } from "./board.js";
 
-const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 const AUTOPLAY_MS = 1000;
 
 // --- state -------------------------------------------------------------------
@@ -98,6 +97,7 @@ async function loadReplay(name) {
   $("empty-hint").style.display = "none";
   $("scrubber").hidden = false;
   $("winprob-panel").hidden = false;
+  $("winprob-axis").textContent = `move 0 → ${M} · higher = blue (P0) ahead`;
   document.querySelector(".p0-name").textContent = `P0 ${R.data.header.agents[0]}`;
   setIndex(0);
 }
@@ -465,7 +465,6 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
-window.addEventListener("resize", drawWinProb);
 
 // --- helpers -----------------------------------------------------------------
 
