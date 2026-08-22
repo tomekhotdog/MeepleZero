@@ -13,8 +13,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from carcassonne.agents.base import Agent, TurnContext
 from carcassonne.core import GameConfig, apply, final_scores, is_terminal, new_game
+from carcassonne.game.agent import Agent, TurnContext
 from carcassonne.game.replay import REPLAY_VERSION, ReplayHeader, ReplayWriter
 
 _DEFAULT_CONFIG = GameConfig()

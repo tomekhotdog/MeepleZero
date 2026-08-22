@@ -1,40 +1,25 @@
-"""Agent protocol and registry: an agent maps a game state to a move."""
+"""Agent registry, plus re-export of the Agent protocol (defined in game.agent).
+
+Import agents via the package (`carcassonne.agents`) so built-in registrations
+run; importing this module directly leaves the registry empty.
+"""
 
 from __future__ import annotations
 
-import random
 from collections.abc import Callable
-from dataclasses import dataclass
-from typing import Protocol
 
-from carcassonne.core import GameState, Move
-from carcassonne.game.serde import Annot
+from carcassonne.game.agent import Agent, TurnContext
 
-
-@dataclass(frozen=True, slots=True)
-class TurnContext:
-    """Per-game context handed to agents on every turn.
-
-    `rng` is one seeded generator shared by both agents for the whole game
-    (seeded by the match runner, distinct from the deck seed). When `annotate`
-    is False, agents may skip expensive annotation work and return None.
-    """
-
-    rng: random.Random
-    annotate: bool = False
-
-
-class Agent(Protocol):
-    name: str
-
-    def choose(self, state: GameState, ctx: TurnContext) -> tuple[Move, Annot | None]: ...
-
+__all__ = ["Agent", "TurnContext", "make_agent", "register_agent"]
 
 _FACTORIES: dict[str, Callable[[], Agent]] = {}
 
 
 def register_agent(spec: str, factory: Callable[[], Agent]) -> None:
     """Register a factory under a spec string ("random"; later: "greedy", "ckpt:<id>")."""
+    existing = _FACTORIES.get(spec)
+    if existing is not None and existing is not factory:
+        raise ValueError(f"agent spec {spec!r} already registered with a different factory")
     _FACTORIES[spec] = factory
 
 
