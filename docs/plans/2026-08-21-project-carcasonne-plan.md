@@ -950,7 +950,7 @@ Commit: `git commit -am "feat(nn): state encoder + action indexer with D4 tests"
 
 ---
 
-### Task 15: Network + Checkpoint
+### Task 15: Network + Checkpoint ✅ DONE (37f85e9; 655,865 params — Pi-sized; head/ActionIndexer alignment proven by test_policy_head_matches_action_indexer: evaluate_state's non-zero-prob set == legal_mask set == {encode_move(m)} and positional probs[encode_move(m)]>0. Reshape: policy conv (N,56,H,W) → (N,rot,a,wy,wx) → permute(0,3,4,1,2) → (N,wy,wx,rot,a) → flatten = ((wy*B+wx)*4+rot)*14+a. Masked illegal logits = -inf.)
 **Depends on:** Task 14
 
 **Files:**
