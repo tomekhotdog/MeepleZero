@@ -769,7 +769,7 @@ Commit: `git commit -am "feat(game): JSONL replay format with verifying loader"`
 
 ---
 
-### Task 9: Agent protocol, RandomAgent, `simulate` CLI
+### Task 9: Agent protocol, RandomAgent, `simulate` CLI ✅ DONE (1e8ccc0; registry = dict in agents/base with `register_agent()`, built-ins register on `carcassonne.agents` import; env fix: recreated .venv — a stale macOS UF_HIDDEN flag on the editable .pth (re-applied by iCloud/file-provider on ~/Documents) made Python skip it, breaking the `carcassonne` console script)
 **Depends on:** Task 8
 
 **Files:**
