@@ -1,5 +1,6 @@
 """Command-line interface. `carcassonne simulate` plays agent-vs-agent games;
-`carcassonne evaluate` runs a seat-swapped head-to-head match and prints a table."""
+`carcassonne evaluate` runs a seat-swapped head-to-head match and prints a table;
+`carcassonne serve` runs the web app."""
 
 from __future__ import annotations
 
@@ -19,6 +20,7 @@ def main(argv: list[str] | None = None) -> int:
     handlers: dict[str, Callable[[argparse.Namespace], int]] = {
         "simulate": _simulate,
         "evaluate": _evaluate,
+        "serve": _serve,
     }
     return handlers[args.command](args)
 
@@ -43,6 +45,13 @@ def _build_parser() -> argparse.ArgumentParser:
     ev.add_argument("--out", type=Path, default=None, help="directory for replay files (optional)")
     ev.add_argument(
         "--no-swap", action="store_true", help="p0 keeps seat 0 in every game (default: alternate)"
+    )
+
+    srv = sub.add_parser("serve", help="run the web app (play + replay API)")
+    srv.add_argument("--host", default="127.0.0.1", help="bind address (default 127.0.0.1)")
+    srv.add_argument("--port", type=int, default=8000, help="port (default 8000)")
+    srv.add_argument(
+        "--replays", type=Path, default=Path("replays"), help="replay directory (default replays/)"
     )
     return parser
 
@@ -102,6 +111,17 @@ def _evaluate(args: argparse.Namespace) -> int:
     print(f"  wins: p0={r.wins[0]} p1={r.wins[1]} draws={r.draws}")
     print(f"  mean scores: p0={r.mean_scores[0]:.1f} p1={r.mean_scores[1]:.1f}")
     print(f"  p0 win rate: {rate:.1%}")
+    return 0
+
+
+def _serve(args: argparse.Namespace) -> int:
+    # Imported lazily so simulate/evaluate never pay the fastapi import cost.
+    import uvicorn
+
+    from carcassonne.web.app import create_app
+
+    # Single worker on purpose: game sessions are in-process state (see web.sessions).
+    uvicorn.run(create_app(args.replays), host=args.host, port=args.port)
     return 0
 
 
