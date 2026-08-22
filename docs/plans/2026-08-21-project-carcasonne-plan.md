@@ -795,7 +795,7 @@ Commit: `git commit -am "feat(agents,cli): Agent protocol, RandomAgent, simulate
 
 ---
 
-### Task 10: GreedyAgent + `evaluate` CLI
+### Task 10: GreedyAgent + `evaluate` CLI ✅ DONE (1338967; yardstick: greedy 20/20 vs random, mean 127.3–31.4; endgame_potential added to core (shares final_scores' valuation via _endgame_awards); greedy evaluates on a deckless state copy — apply's post-move draw scan was ~95% of runtime and can't affect the value)
 **Depends on:** Task 9
 
 **Files:**
