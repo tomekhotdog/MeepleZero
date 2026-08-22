@@ -33,13 +33,24 @@ def test_index_served_at_root(client: TestClient) -> None:
     assert "app.js" in r.text
 
 
+def test_replay_page_served(client: TestClient) -> None:
+    r = client.get("/replay")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/html")
+    assert 'id="app"' in r.text
+    assert "replay.js" in r.text
+
+
 @pytest.mark.parametrize(
     ("name", "content_type"),
     [
         ("app.js", "javascript"),
+        ("board.js", "javascript"),
+        ("replay.js", "javascript"),
         ("tiles.js", "javascript"),
         ("style.css", "text/css"),
         ("index.html", "text/html"),
+        ("replay.html", "text/html"),
     ],
 )
 def test_static_assets_served(client: TestClient, name: str, content_type: str) -> None:
@@ -48,10 +59,11 @@ def test_static_assets_served(client: TestClient, name: str, content_type: str) 
     assert content_type in r.headers["content-type"]
 
 
-def test_index_references_only_existing_files() -> None:
-    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+@pytest.mark.parametrize("page", ["index.html", "replay.html"])
+def test_page_references_only_existing_files(page: str) -> None:
+    html = (STATIC_DIR / page).read_text(encoding="utf-8")
     refs = re.findall(r'(?:src|href)="([^"]+)"', html)
-    assert refs, "index.html should reference its assets"
+    assert refs, f"{page} should reference its assets"
     for ref in refs:
         if ref.startswith("data:"):
             continue  # inline data URI (favicon): local by definition
@@ -59,7 +71,7 @@ def test_index_references_only_existing_files() -> None:
         assert (STATIC_DIR / ref.removeprefix("/static/")).is_file(), f"missing: {ref}"
 
 
-@pytest.mark.parametrize("name", ["app.js", "tiles.js"])
+@pytest.mark.parametrize("name", ["app.js", "board.js", "replay.js", "tiles.js"])
 def test_js_syntax(name: str, tmp_path: Path) -> None:
     node = shutil.which("node")
     if node is None:

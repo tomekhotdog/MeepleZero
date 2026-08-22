@@ -447,6 +447,231 @@ dialog .actions {
   margin-top: 14px;
 }
 
+/* --- replay view ----------------------------------------------------------- */
+
+/* Shared type helpers used by the replay sidebar. */
+.mono {
+  font-family: var(--mono);
+}
+.muted {
+  color: var(--bone-dim);
+}
+.ai {
+  color: var(--ai);
+}
+
+#empty-hint {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: var(--bone-dim);
+  font-family: var(--serif);
+  font-size: 16px;
+}
+
+.replay-sidebar .panel {
+  background: var(--stage);
+  border: 1px solid var(--hairline);
+  border-radius: 4px;
+  padding: 10px 12px;
+}
+
+.replay-sidebar .panel[hidden] {
+  display: none;
+}
+
+.panel-title {
+  display: block;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--bone-dim);
+  margin-bottom: 8px;
+}
+
+.replay-sidebar select {
+  width: 100%;
+  background: var(--stage-raised);
+  color: var(--bone);
+  border: 1px solid var(--hairline);
+  border-radius: 4px;
+  padding: 6px 8px;
+  font-family: var(--ui);
+  font-size: 12px;
+}
+
+.error {
+  color: var(--p1);
+  font-size: 12px;
+  margin-top: 8px;
+  overflow-wrap: anywhere;
+}
+.error:empty {
+  display: none;
+}
+
+/* Scrubber. */
+.scrub-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+#position {
+  font-size: 13px;
+}
+
+#slider {
+  width: 100%;
+  accent-color: var(--ai);
+  cursor: pointer;
+}
+
+.scrub-buttons {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.scrub-buttons button,
+#play {
+  flex: 1;
+  padding: 6px 0;
+  background: var(--stage-raised);
+  color: var(--bone);
+  border: 1px solid var(--hairline);
+  border-radius: 4px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+#play {
+  flex: none;
+  width: 34px;
+}
+
+.scrub-buttons button:hover,
+#play:hover {
+  border-color: var(--bone-dim);
+}
+
+/* Move info. */
+#move-who {
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+}
+#move-detail {
+  font-size: 12px;
+  color: var(--bone-dim);
+  margin: 4px 0;
+  overflow-wrap: anywhere;
+}
+.swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  margin-right: 6px;
+}
+.swatch.p0 {
+  background: var(--p0);
+}
+.swatch.p1 {
+  background: var(--p1);
+}
+.delta-chip {
+  display: inline-block;
+  font-family: var(--serif);
+  font-size: 15px;
+  margin-right: 10px;
+}
+.delta-chip.p0 {
+  color: var(--p0);
+}
+.delta-chip.p1 {
+  color: var(--p1);
+}
+
+/* Search panel — the signature exhibit. */
+#search-value {
+  font-size: 13px;
+}
+#search-meta {
+  font-size: 11px;
+  margin: 2px 0 8px;
+}
+.cand {
+  padding: 6px 6px;
+  border-radius: 4px;
+  margin-bottom: 4px;
+  border: 1px solid transparent;
+}
+.cand.played {
+  border-color: var(--ai);
+  background: rgba(95, 212, 196, 0.08);
+}
+.cand-label {
+  font-size: 11px;
+  color: var(--bone);
+  margin-bottom: 3px;
+}
+.cand.played .cand-label {
+  color: var(--ai);
+}
+.bar-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 15px;
+}
+.bar-tag {
+  width: 38px;
+  flex: none;
+  font-size: 9px;
+  color: var(--bone-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.bar-track {
+  flex: 1;
+  height: 7px;
+  background: var(--stage-raised);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.bar-fill {
+  height: 100%;
+  border-radius: 3px;
+}
+.bar-fill.prior {
+  background: var(--bone-dim);
+}
+.bar-fill.visits {
+  background: var(--ai);
+}
+.bar-pct {
+  width: 30px;
+  flex: none;
+  text-align: right;
+  font-size: 10px;
+  color: var(--bone-dim);
+}
+#search-note {
+  font-size: 11px;
+  margin-top: 6px;
+}
+
+/* Win-probability chart. */
+#winprob {
+  display: block;
+  width: 100%;
+  height: 120px;
+  cursor: pointer;
+}
+
 /* --- motion ---------------------------------------------------------------- */
 
 @media (prefers-reduced-motion: reduce) {

@@ -47,6 +47,10 @@ def create_app(replays_dir: Path) -> FastAPI:
     def index() -> FileResponse:
         return FileResponse(_STATIC_DIR / "index.html")
 
+    @app.get("/replay")
+    def replay_page() -> FileResponse:
+        return FileResponse(_STATIC_DIR / "replay.html")
+
     @app.get("/api/health")
     def health() -> dict[str, Any]:
         return {"ok": True}

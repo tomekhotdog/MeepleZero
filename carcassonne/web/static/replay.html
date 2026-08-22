@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Carcassonne — replay</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <div id="app">
+      <main id="stage">
+        <canvas id="board"></canvas>
+        <div id="empty-hint">Pick a replay to begin.</div>
+      </main>
+
+      <aside id="sidebar" class="replay-sidebar">
+        <!-- (1) Replay picker -->
+        <div class="panel">
+          <label class="panel-title" for="replay-select">Replay</label>
+          <select id="replay-select" aria-label="Choose a replay">
+            <option value="">Loading…</option>
+          </select>
+          <div id="replay-error" class="error" role="alert"></div>
+        </div>
+
+        <!-- (2) Scrubber -->
+        <div class="panel" id="scrubber" hidden>
+          <div class="scrub-head">
+            <span id="position" class="mono">move 0 / 0</span>
+            <button id="play" type="button" aria-label="Play / pause" title="Play / pause (space)">▶</button>
+          </div>
+          <input id="slider" type="range" min="0" max="0" value="0" step="1" aria-label="Move" />
+          <div class="scrub-buttons">
+            <button id="first" type="button" title="First (Home)">⏮</button>
+            <button id="prev" type="button" title="Previous (←)">◀</button>
+            <button id="next" type="button" title="Next (→)">▶</button>
+            <button id="last" type="button" title="Last (End)">⏭</button>
+          </div>
+        </div>
+
+        <!-- (3) Move info -->
+        <div class="panel" id="move-info" hidden>
+          <div class="panel-title">This move</div>
+          <div id="move-who"></div>
+          <div id="move-detail" class="mono"></div>
+          <div id="move-delta"></div>
+        </div>
+
+        <!-- (4) The search panel -->
+        <div class="panel search-panel" id="search-panel" hidden>
+          <div class="panel-title">Network prior vs search visits</div>
+          <div id="search-value" class="mono ai"></div>
+          <div id="search-meta" class="mono muted"></div>
+          <div id="search-bars"></div>
+          <div id="search-note" class="muted"></div>
+        </div>
+
+        <!-- (5) Win-probability chart -->
+        <div class="panel" id="winprob-panel" hidden>
+          <div class="panel-title">Win probability — <span class="p0-name mono"></span></div>
+          <canvas id="winprob" aria-label="Win probability across the game"></canvas>
+          <div id="winprob-axis" class="mono muted"></div>
+        </div>
+      </aside>
+    </div>
+
+    <script type="module" src="/static/replay.js"></script>
+  </body>
+</html>

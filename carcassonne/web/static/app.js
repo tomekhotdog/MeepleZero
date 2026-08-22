@@ -5,8 +5,15 @@
 // server contracts are consumed exactly as produced by web/views.py.
 
 import { TOKENS, drawTile, drawMeepleGlyph, featureAnchor } from "./tiles.js";
-
-const CELL = 64; // world cell size at zoom 1
+import {
+  cellPx as boardCellPx,
+  worldToScreen as boardWorldToScreen,
+  screenToCell as boardScreenToCell,
+  screenToCellFloat as boardScreenToCellFloat,
+  resizeToDisplay,
+  drawTiles,
+  drawFrontier,
+} from "./board.js";
 
 const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 
@@ -210,72 +217,23 @@ function drawLens() {
 
 // --- board camera + geometry -------------------------------------------------------
 
-// World: +x east, +y north (Pos.neighbor). Screen: y down, so north is up.
-function cellPx() {
-  return CELL * S.cam.zoom;
-}
-
-function worldToScreen(x, y) {
-  const c = cellPx();
-  return {
-    sx: board.clientWidth / 2 + (x - S.cam.x) * c,
-    sy: board.clientHeight / 2 - (y - S.cam.y) * c,
-  };
-}
-
-function screenToCell(px, py) {
-  const c = cellPx();
-  return {
-    x: Math.round((px - board.clientWidth / 2) / c + S.cam.x),
-    y: Math.round(-(py - board.clientHeight / 2) / c + S.cam.y),
-  };
-}
+// Thin adapters over the shared board module, bound to this page's canvas + cam
+// so the many call sites below stay terse. The renderer itself lives in board.js.
+const cellPx = () => boardCellPx(S.cam);
+const worldToScreen = (x, y) => boardWorldToScreen(board, S.cam, x, y);
+const screenToCell = (px, py) => boardScreenToCell(board, S.cam, px, py);
 
 // --- board rendering ------------------------------------------------------------------
 
 function render(now) {
-  const dpr = window.devicePixelRatio || 1;
-  const w = board.clientWidth;
-  const h = board.clientHeight;
-  if (board.width !== Math.round(w * dpr) || board.height !== Math.round(h * dpr)) {
-    board.width = Math.round(w * dpr);
-    board.height = Math.round(h * dpr);
-  }
-  bctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const { w, h } = resizeToDisplay(board, bctx);
   bctx.clearRect(0, 0, w, h);
   if (!S.view || !S.tiledefs) {
     requestAnimationFrame(render);
     return;
   }
-  const c = cellPx();
-  const placed = new Map(); // "x,y" -> tile
-  for (const t of S.view.tiles) placed.set(`${t.x},${t.y}`, t);
-
-  // Placed tiles.
-  for (const t of S.view.tiles) {
-    const { sx, sy } = worldToScreen(t.x, t.y);
-    bctx.save();
-    bctx.translate(sx - c / 2, sy - c / 2);
-    drawTile(bctx, S.tiledefs[t.type], t.rot, c, { meeples: t.meeples });
-    bctx.restore();
-  }
-
-  // Frontier markers: subtle dots on empty neighbours of the board.
-  bctx.fillStyle = "rgba(155, 163, 173, 0.3)";
-  const frontier = new Set();
-  for (const t of S.view.tiles) {
-    for (const [dx, dy] of [[0, 1], [1, 0], [0, -1], [-1, 0]]) {
-      const key = `${t.x + dx},${t.y + dy}`;
-      if (!placed.has(key)) frontier.add(key);
-    }
-  }
-  for (const key of frontier) {
-    const [x, y] = key.split(",").map(Number);
-    const { sx, sy } = worldToScreen(x, y);
-    bctx.beginPath();
-    bctx.arc(sx, sy, Math.max(1.5, c * 0.03), 0, 2 * Math.PI);
-    bctx.fill();
-  }
+  const c = drawTiles(bctx, board, S.view, S.tiledefs, S.cam);
+  drawFrontier(bctx, board, S.view, S.cam);
 
   const placing = S.phase === "placing";
   const legalCells = new Map(); // cells legal at the CURRENT rotation
@@ -504,13 +462,7 @@ board.addEventListener(
   { passive: false }
 );
 
-function screenToCellFloat(px, py) {
-  const c = cellPx();
-  return {
-    x: (px - board.clientWidth / 2) / c + S.cam.x,
-    y: -(py - board.clientHeight / 2) / c + S.cam.y,
-  };
-}
+const screenToCellFloat = (px, py) => boardScreenToCellFloat(board, S.cam, px, py);
 
 // --- keyboard ------------------------------------------------------------------------------
 
