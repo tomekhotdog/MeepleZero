@@ -598,7 +598,7 @@ fully, same pattern as `with_tile`.)
 
 ---
 
-### Task 6: apply() — full turn resolution and scoring
+### Task 6: apply() — full turn resolution and scoring ✅ DONE (4e186ae; test note: a 2-tile shielded city is unbuildable with real tiles — majority test uses the smallest real shielded city, E+F+E = 3 tiles + shield = 8 pts)
 **Depends on:** Tasks 4, 5
 
 **Files:**
