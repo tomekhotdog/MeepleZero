@@ -678,7 +678,7 @@ def test_apply_rejects_illegal_move(): ...              # raises IllegalMove
 
 ---
 
-### Task 7: Game lifecycle + property tests — the five-function API
+### Task 7: Game lifecycle + property tests — the five-function API ✅ DONE (d1695fa; seed-42 snapshot pinned: 71 turns, final_scores (42, 50))
 **Depends on:** Task 6
 
 **Files:**
