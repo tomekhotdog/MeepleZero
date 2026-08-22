@@ -1132,7 +1132,7 @@ Commit: `git commit -am "feat(web): training run dashboard"`
 
 ---
 
-### Task 22: Final verification (success bar)
+### Task 22: Final verification ✅ DONE (173 tests+fix; e2e verified; criteria 2&4 deferred to runtime — see 2026-08-22-iteration1-verification.md) (success bar)
 **Depends on:** all
 
 No new features. Execute and record results in `docs/plans/` as

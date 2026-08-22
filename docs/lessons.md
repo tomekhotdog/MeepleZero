@@ -27,3 +27,15 @@
   `carcassonne` console script while pytest still passes. Fix: recreate the venv
   (`rm -rf .venv && uv sync --extra dev`). Diagnose this first if the CLI raises
   ModuleNotFoundError.
+
+- [rule] 2026-08-22 — **iCloud sync corrupts the git repo — MOVE THE PROJECT OUT
+  OF `~/Documents`.** Beyond the venv, iCloud syncs the working tree AND `.git`:
+  it silently reverted freshly-edited source files back to cached copies mid-task
+  (twice), and reverted `.git`'s branch ref so a just-made commit was orphaned
+  (`main` snapped back one commit; the fix survived only as a dangling commit,
+  recovered via `git merge --ff-only <hash>`). This can silently lose work and
+  make tests run against stale content. The real fix is to move the repo to a
+  non-synced path (e.g. `~/dev/Carcasonne`) or disable iCloud sync for it. Until
+  then: after every commit, verify `git log -1` is the intended hash and
+  `git status` is clean; if a working file reverts, `git checkout -- <file>`;
+  if a commit is orphaned, `git merge --ff-only <hash>` or `git reset --hard <hash>`.
