@@ -4,6 +4,7 @@ import dataclasses
 import random
 
 import numpy as np
+from numpy.typing import NDArray
 
 from carcassonne.core import apply, is_terminal, legal_moves, new_game
 from carcassonne.core.engine import GameState
@@ -12,6 +13,8 @@ from carcassonne.core.state import Board, PlacedTile
 from carcassonne.core.types import Move, PlaceMeeple, Pos, Rotation
 from carcassonne.nn.actions import WINDOW, window_origin
 from carcassonne.nn.encode import NUM_PLANES, PLANES, encode_state
+
+FloatArray = NDArray[np.float32]
 
 # ---------------------------------------------------------------------------
 # Basic shape / manifest
@@ -102,7 +105,7 @@ def rotate_state_90(state: GameState) -> GameState:
     return dataclasses.replace(state, board=board, features=idx, abbot_at=abbot_at)
 
 
-def _crop(planes: np.ndarray, state: GameState) -> np.ndarray:
+def _crop(planes: FloatArray, state: GameState) -> FloatArray:
     """Crop spatial planes to the occupied bounding box (removes centring)."""
     ox, oy = window_origin(state)
     xs = [p.x for p in state.board]
@@ -146,7 +149,7 @@ def test_d4_rotation_equivariance() -> None:
 # helpers
 
 
-def _n_current_tile_planes_set(planes: np.ndarray) -> int:
+def _n_current_tile_planes_set(planes: FloatArray) -> int:
     tile_idx = [PLANES.index(name) for name in PLANES if name.startswith("tile_")]
     return int(sum(bool(planes[i].any()) for i in tile_idx))
 
