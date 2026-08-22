@@ -64,11 +64,12 @@ def test_static_assets_served(client: TestClient, name: str, content_type: str) 
 @pytest.mark.parametrize("page", ["index.html", "replay.html", "training.html"])
 def test_page_references_only_existing_files(page: str) -> None:
     html = (STATIC_DIR / page).read_text(encoding="utf-8")
+    app_routes = {"/", "/replay", "/training"}  # nav links to other views, not assets
     refs = re.findall(r'(?:src|href)="([^"]+)"', html)
     assert refs, f"{page} should reference its assets"
     for ref in refs:
-        if ref.startswith("data:"):
-            continue  # inline data URI (favicon): local by definition
+        if ref.startswith("data:") or ref in app_routes:
+            continue  # inline data URI (favicon) or an in-app nav route
         assert ref.startswith("/static/"), f"non-local reference: {ref}"
         assert (STATIC_DIR / ref.removeprefix("/static/")).is_file(), f"missing: {ref}"
 
