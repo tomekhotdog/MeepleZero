@@ -863,7 +863,7 @@ Commit: `git commit -am "feat(web): FastAPI game/replay API"`
 
 ---
 
-### Task 12: Play view (canvas frontend)
+### Task 12: Play view (canvas frontend) ✅ DONE (057ba6f; verified by a full headless-browser game vs greedy through the real UI — zero console errors; sidebar deck-remaining dropped in favour of the design-system sidebar spec (lens/status/scores/hint/log/new-game); env note: the iCloud UF_HIDDEN .pth issue from Tasks 9/11 recurred — server verified via `python -m carcassonne.cli.main serve`)
 **Depends on:** Task 11
 
 **Files:**
