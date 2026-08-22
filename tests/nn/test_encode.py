@@ -187,3 +187,31 @@ def _meeple_biased_game(seed: int, moves: int) -> GameState:
 
 def _places_meeple(move: Move) -> bool:
     return isinstance(move.action, PlaceMeeple)
+
+
+def test_wide_board_is_cropped_not_raised() -> None:
+    # A board spanning more than WINDOW tiles in one axis must encode as a crop,
+    # never raise (a long straight game is legal and must not crash self-play).
+    board: Board = {Pos(x, 0): PlacedTile("U", Rotation.R90) for x in range(-20, WINDOW + 5)}
+    state = GameState(
+        board=board,
+        features=FeatureIndex.empty(),
+        deck=(),
+        current_tile=None,
+        current_player=0,
+        scores=(0, 0),
+        meeples=(7, 7),
+        abbots=(True, True),
+        abbot_at=(None, None),
+        discarded=(),
+        last_events=(),
+        turn=len(board),
+    )
+    board_span = max(p.x for p in board) - min(p.x for p in board) + 1
+    assert board_span > WINDOW  # precondition: genuinely wider than the window
+
+    planes = encode_state(state)  # must not raise
+    assert planes.shape == (NUM_PLANES, WINDOW, WINDOW)
+    occupied = int(planes[PLANES.index("occupied")].sum())
+    assert occupied == WINDOW  # exactly the in-crop row of tiles, far tiles omitted
+    assert occupied < len(board)  # some tiles were genuinely cropped out
