@@ -1086,7 +1086,7 @@ Commit: `git commit -am "feat(training): learner with D4 augmentation and lossle
 
 ---
 
-### Task 20: Arena gating + `train` CLI orchestration ✅ DONE (b7e6aca)
+### Task 20: Arena gating + `train` CLI orchestration ✅ DONE (9d1b806)
 **Depends on:** Task 19
 
 **Files:**
