@@ -1063,7 +1063,7 @@ Commit: `git commit -am "feat(training): self-play generation + sqlite replay bu
 
 ---
 
-### Task 19: Learner + resume
+### Task 19: Learner + resume ✅ DONE (0917193; D4 = rotations only, resampled through the engine for correctness-by-construction — reflections excluded as base-game tiles are chiral; NaN-safe policy loss via torch.where over the target support; metrics keys per caller contract {step, loss, policy_loss, value_loss, buffer_games, buffer_examples})
 **Depends on:** Task 18
 
 **Files:**
