@@ -511,14 +511,76 @@ dialog .actions {
   font-size: 16px;
 }
 
-.replay-sidebar .panel {
+/* --- replay 3-column workbench layout -------------------------------------
+   The replay view is a three-column row (see #app.replay in replay.html):
+     #move-rail (picker / move list) | #stage (board + scrubber) | #analysis
+   All replay chrome is scoped under `.replay` so the shared #stage / #board /
+   #sidebar base rules keep working for the play and training views. */
+
+.replay #move-rail {
+  width: 180px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px 14px;
+  background: var(--stage-raised);
+  border-right: 1px solid var(--hairline);
+  overflow-y: auto;
+}
+
+.replay #analysis {
+  width: 320px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 18px 16px;
+  background: var(--stage-raised);
+  border-left: 1px solid var(--hairline);
+  overflow-y: auto;
+}
+
+.replay #analysis section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* Section headers "This move" / "This game" — panel-title style, but a touch
+   more prominent (bone, underlined) since they head a group of panels. */
+.replay .section-label {
+  margin-bottom: 2px;
+  padding-bottom: 6px;
+  color: var(--bone);
+  border-bottom: 1px solid var(--hairline);
+}
+
+/* Centre column stacks the board (fills) above the scrubber (natural height). */
+.replay #stage {
+  display: flex;
+  flex-direction: column;
+}
+
+.replay #board {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: auto;
+}
+
+.replay #scrubber {
+  flex: none;
+  margin: 12px;
+}
+
+.replay .panel {
   background: var(--stage);
   border: 1px solid var(--hairline);
   border-radius: 4px;
   padding: 10px 12px;
 }
 
-.replay-sidebar .panel[hidden] {
+.replay .panel[hidden] {
   display: none;
 }
 
@@ -531,7 +593,7 @@ dialog .actions {
   margin-bottom: 8px;
 }
 
-.replay-sidebar select {
+.replay select {
   width: 100%;
   background: var(--stage-raised);
   color: var(--bone);
