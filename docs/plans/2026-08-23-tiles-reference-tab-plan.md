@@ -14,7 +14,7 @@
 
 ---
 
-### Task 1: Backbone — route, page shell, nav on all pages, static tests
+### Task 1: Backbone — route, page shell, nav on all pages, static tests ✅ DONE (87a228a)
 
 **Depends on:** none
 
@@ -136,7 +136,7 @@ git commit -m "feat(web): /tiles route, page shell, persistent nav link"
 
 ---
 
-### Task 2: Full atlas — classify, cards, badges, header summary
+### Task 2: Full atlas — classify, cards, badges, header summary ✅ DONE (988dbd3, +e12a4c7 shield-aria fix)
 
 **Depends on:** Task 1
 
@@ -375,7 +375,7 @@ git commit -m "feat(web): tiles atlas — grouped cards, notes, badges, deck sum
 
 ---
 
-### Task 3: Behavioural verification (headless)
+### Task 3: Behavioural verification (headless) ✅ DONE (ok:true — 4 groups, 30 cards, 72/24/6/8, splits 8/8/10/4, rotation+shield-aria+zero errors)
 
 **Depends on:** Task 2
 
