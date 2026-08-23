@@ -69,6 +69,10 @@ def create_app(
     def training_page() -> FileResponse:
         return FileResponse(_STATIC_DIR / "training.html")
 
+    @app.get("/tiles")
+    def tiles_page() -> FileResponse:
+        return FileResponse(_STATIC_DIR / "tiles.html")
+
     @app.get("/api/health")
     def health() -> dict[str, Any]:
         return {"ok": True}

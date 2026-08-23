@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Carcassonne — tiles</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <nav id="topnav">
+      <span class="brand">Carcassonne</span>
+      <a href="/">Play</a>
+      <a href="/replay">Replays</a>
+      <a href="/training">Training</a>
+      <a href="/tiles" aria-current="page">Tiles</a>
+    </nav>
+    <div id="app" class="atlas">
+      <header id="atlas-head">
+        <h1>The deck</h1>
+        <div id="summary" class="summary">Loading…</div>
+        <div class="legend">
+          <span class="legend-title">Scoring</span>
+          <ul>
+            <li><b>City</b> — 2 / tile + 2 / shield (halved if unfinished at game end)</li>
+            <li><b>Road</b> — 1 / tile</li>
+            <li><b>Monastery / Garden</b> — up to 9 (its tile + 8 neighbours) when enclosed</li>
+          </ul>
+        </div>
+        <div id="atlas-error" class="error" role="alert"></div>
+      </header>
+      <div id="groups"></div>
+    </div>
+    <script type="module" src="/static/atlas.js"></script>
+  </body>
+</html>
