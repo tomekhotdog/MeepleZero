@@ -127,6 +127,7 @@ def tiledefs_view() -> dict[str, Any]:
     return {
         "tiles": {
             tt.id: {
+                "count": tt.count,
                 "edges": [kind.value for kind in derived_edges(tt)],
                 "features": [
                     {

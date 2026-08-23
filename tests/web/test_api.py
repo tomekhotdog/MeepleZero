@@ -73,6 +73,12 @@ def test_tiledefs_covers_all_tile_types_and_d_is_correct(client: TestClient) -> 
     ]
 
 
+def test_tiledefs_carries_counts_summing_to_72(client: TestClient) -> None:
+    tiles = client.get("/api/tiledefs").json()["tiles"]
+    assert all(t["count"] >= 1 for t in tiles.values())
+    assert sum(t["count"] for t in tiles.values()) == 72
+
+
 # --- 2. full scripted game vs random --------------------------------------
 
 
