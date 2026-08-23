@@ -780,6 +780,19 @@ dialog .actions {
   font-size: 11px;
   margin: 2px 0 8px;
 }
+/* Win% delta vs the previous annotated move. Neutral chrome (no reserved
+   colour): the ▲/▼ glyph carries direction; --bone-dim mutes a flat/first move. */
+.win-delta {
+  margin-left: 6px;
+  font-size: 12px;
+}
+.win-delta.up,
+.win-delta.down {
+  color: var(--bone);
+}
+.win-delta.flat {
+  color: var(--bone-dim);
+}
 .cand {
   padding: 6px 6px;
   border-radius: 4px;

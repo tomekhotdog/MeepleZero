@@ -324,6 +324,16 @@ function sameMove(a, b) {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
+// P0-perspective win% for a move's annot, or null if it has no search data.
+// annot.value is the MOVING player's value in [-1, 1] (tanh); flip it to P0's
+// perspective and map to [0, 100] — the exact transform buildWinProb uses for
+// the win-probability chart, so this number always agrees with that chart.
+function winPctOf(rec) {
+  if (!rec || !rec.annot) return null;
+  const p0Value = rec.player === 0 ? rec.annot.value : -rec.annot.value;
+  return Math.round(50 * (1 + p0Value));
+}
+
 function renderSearchPanel() {
   const panel = $("search-panel");
   const bars = $("search-bars");
@@ -354,7 +364,35 @@ function renderSearchPanel() {
   const totalPrior = annot.top.reduce((s, c) => s + c.prior, 0) || 1;
   const heuristic = totalVisits === 0;
 
-  valueEl.textContent = `AI value: ${annot.value >= 0 ? "+" : ""}${annot.value.toFixed(2)}`;
+  // Value as a P0-perspective win%, with a delta vs the previous ANNOTATED move.
+  // Human moves have no annot, so we search back past them for the last search.
+  const winPct = winPctOf(rec);
+  let prevPct = null;
+  for (let i = c - 1; i >= 0; i--) {
+    const p = winPctOf(moves()[i]);
+    if (p !== null) {
+      prevPct = p;
+      break;
+    }
+  }
+  valueEl.replaceChildren();
+  valueEl.append(document.createTextNode("P0 win: "));
+  const pctEl = document.createElement("span");
+  pctEl.className = "ai"; // --ai accents the win% only, not the delta
+  pctEl.textContent = `${winPct}%`;
+  valueEl.append(pctEl);
+  const deltaEl = document.createElement("span");
+  if (prevPct === null) {
+    deltaEl.className = "win-delta flat";
+    deltaEl.textContent = "—"; // first annotated move: no baseline to diff against
+  } else {
+    const diff = winPct - prevPct;
+    deltaEl.className = `win-delta ${diff > 0 ? "up" : diff < 0 ? "down" : "flat"}`;
+    deltaEl.textContent =
+      diff > 0 ? `▲ +${diff}%` : diff < 0 ? `▼ −${Math.abs(diff)}%` : "—";
+  }
+  valueEl.append(deltaEl);
+
   metaEl.textContent = `${annot.sims} sims · ${annot.think_ms} ms`;
 
   for (const c of annot.top) {
@@ -370,9 +408,17 @@ function renderSearchPanel() {
     bars.append(row);
   }
 
-  note.textContent = heuristic
-    ? "Prior weights are the greedy heuristic — no tree search (visits 0)."
-    : "";
+  // Agree/overrule flag: did the tree search stick with the network's top prior,
+  // or did visits crown a different move? Only meaningful with real MCTS.
+  if (heuristic) {
+    note.textContent = "Heuristic — no search (visit counts 0; priors shown).";
+  } else {
+    const priorLeader = annot.top.reduce((a, b) => (b.prior > a.prior ? b : a));
+    const visitLeader = annot.top.reduce((a, b) => (b.visits > a.visits ? b : a));
+    note.textContent = sameMove(priorLeader.move, visitLeader.move)
+      ? "Search agreed with its top prior."
+      : `Search overruled its top prior (chose ${moveLabel(visitLeader.move)} over ${moveLabel(priorLeader.move)}).`;
+  }
 }
 
 function barRow(tag, cls, frac) {
