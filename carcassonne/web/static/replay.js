@@ -141,7 +141,9 @@ function setIndex(i) {
   const M = moves().length;
   R.index = Math.max(0, Math.min(M, i));
   $("slider").value = String(R.index);
-  $("position").textContent = R.index < M ? `move ${R.index + 1} / ${M}` : `final / ${M}`;
+  // The current move is the just-played one: moves[R.index - 1]. At R.index 0
+  // no move has been played yet (start position).
+  $("position").textContent = R.index === 0 ? `start / ${M}` : `move ${R.index} / ${M}`;
   clearMeepleHover(); // a moved board makes any hovered feature stale
   renderMoveInfo();
   renderSearchPanel();
@@ -223,7 +225,7 @@ function buildMoveList() {
     }
     row.addEventListener("click", () => {
       stopAutoplay();
-      setIndex(i);
+      setIndex(i + 1); // make move i the just-played move (board shows its result)
     });
     rows.push(row);
   }
@@ -231,19 +233,21 @@ function buildMoveList() {
   R.moveRows = rows;
 }
 
-// Sync the highlight + scroll with R.index. The current move is the one about
-// to be applied (R.index); at the terminal position (R.index === M) no row is
-// current.
+// Sync the highlight + scroll with R.index. The current move is the just-played
+// one, moves[R.index - 1], so row R.index - 1 is highlighted. At the start
+// position (R.index === 0) no row is current; at the terminal position
+// (R.index === M) the last row (M - 1) is current.
 function updateMoveHighlight() {
   const rows = R.moveRows;
   if (!rows) return;
+  const cur = R.index - 1;
   for (let i = 0; i < rows.length; i++) {
-    const on = i === R.index;
+    const on = i === cur;
     rows[i].classList.toggle("current", on);
     if (on) rows[i].setAttribute("aria-current", "true");
     else rows[i].removeAttribute("aria-current");
   }
-  const active = rows[R.index];
+  const active = rows[cur];
   if (active) active.scrollIntoView({ block: "nearest" });
 }
 
@@ -265,14 +269,16 @@ function moveLabel(mv) {
 }
 
 function renderMoveInfo() {
-  const M = moves().length;
   const info = $("move-info");
-  if (R.index >= M) {
+  // The current move is the just-played one: moves[R.index - 1]. At the start
+  // position (R.index === 0) there is no move to describe.
+  const c = R.index - 1;
+  if (c < 0) {
     info.hidden = true;
     return;
   }
   info.hidden = false;
-  const rec = moves()[R.index];
+  const rec = moves()[c];
   const who = $("move-who");
   who.replaceChildren(
     swatch(rec.player),
@@ -281,8 +287,8 @@ function renderMoveInfo() {
   $("move-detail").textContent = `${rec.tile} → ${moveLabel(rec.move)}`;
 
   // Score delta: diff the running scores across this move's two states.
-  const before = R.data.states[R.index].scores;
-  const after = R.data.states[R.index + 1].scores;
+  const before = R.data.states[c].scores;
+  const after = R.data.states[c + 1].scores;
   const delta = $("move-delta");
   delta.replaceChildren();
   const gains = [0, 1].filter((p) => after[p] - before[p] !== 0);
@@ -309,7 +315,6 @@ function sameMove(a, b) {
 
 function renderSearchPanel() {
   const panel = $("search-panel");
-  const M = moves().length;
   const bars = $("search-bars");
   const note = $("search-note");
   const valueEl = $("search-value");
@@ -319,12 +324,15 @@ function renderSearchPanel() {
   metaEl.textContent = "";
   note.textContent = "";
 
-  if (R.index >= M) {
+  // The current move is the just-played one: moves[R.index - 1]. At the start
+  // position (R.index === 0) there is no move to describe.
+  const c = R.index - 1;
+  if (c < 0) {
     panel.hidden = true;
     return;
   }
   panel.hidden = false;
-  const rec = moves()[R.index];
+  const rec = moves()[c];
   const annot = rec.annot;
   if (!annot || annot.top.length === 0) {
     note.textContent = "No search data for this move.";
@@ -449,15 +457,18 @@ function drawWinProb() {
     }
   }
 
-  // Current-position marker.
-  const markIdx = Math.min(R.index, Math.max(0, n - 1));
-  const mx = xAt(markIdx);
-  ctx.strokeStyle = "rgba(232, 226, 212, 0.7)";
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(mx, padT);
-  ctx.lineTo(mx, padT + plotH);
-  ctx.stroke();
+  // Current-move marker: the just-played move, moves[R.index - 1]. At the start
+  // position (R.index === 0) there is no current move, so draw no marker.
+  if (R.index >= 1 && n > 0) {
+    const markIdx = Math.min(R.index - 1, n - 1);
+    const mx = xAt(markIdx);
+    ctx.strokeStyle = "rgba(232, 226, 212, 0.7)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(mx, padT);
+    ctx.lineTo(mx, padT + plotH);
+    ctx.stroke();
+  }
 }
 
 function winProbClick(e) {
@@ -468,7 +479,10 @@ function winProbClick(e) {
   const padR = 6;
   const plotW = rect.width - padL - padR;
   const frac = (e.clientX - rect.left - padL) / plotW;
-  setIndex(Math.round(frac * (n - 1)));
+  // Data point i is move i; make it the just-played move so the marker lands
+  // where the user clicked (marker is drawn at R.index - 1).
+  const i = Math.max(0, Math.min(n - 1, Math.round(frac * (n - 1))));
+  setIndex(i + 1);
 }
 
 // --- board rendering ---------------------------------------------------------
