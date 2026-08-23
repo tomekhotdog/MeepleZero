@@ -27,6 +27,8 @@ import {
 
 const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 
+const DECK_SIZE = 72; // full base deck; the start tile counts as played
+
 // --- application state -------------------------------------------------------
 
 const S = {
@@ -598,6 +600,8 @@ function updateSidebar() {
     }
     supply.append(pip(seat, "abbot", S.view.abbots[seat]));
   }
+  const played = S.view.tiles.length;
+  $("tile-count").textContent = `tiles played ${played} · remaining ${DECK_SIZE - played}`;
 }
 
 function pip(seat, kind, filled) {

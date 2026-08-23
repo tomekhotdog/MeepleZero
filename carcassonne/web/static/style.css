@@ -314,6 +314,17 @@ body {
   display: block;
 }
 
+/* Tiles played / remaining — a compact info line under the score cards. */
+#tile-count {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--bone-dim);
+  text-align: center;
+}
+#tile-count:empty {
+  display: none;
+}
+
 /* (4) Hint toggle — the ONE place the --ai accent lights up chrome. */
 #hint-row {
   display: flex;
