@@ -135,9 +135,10 @@ def test_training_page_served(client: TestClient) -> None:
 
 def test_training_page_references_only_existing_files() -> None:
     html = (STATIC_DIR / "training.html").read_text(encoding="utf-8")
+    app_routes = {"/", "/replay", "/training"}  # top-nav links to other views
     refs = re.findall(r'(?:src|href)="([^"]+)"', html)
     for ref in refs:
-        if ref.startswith("data:"):
+        if ref.startswith("data:") or ref in app_routes:
             continue
         assert ref.startswith("/static/"), f"non-local reference: {ref}"
         assert (STATIC_DIR / ref.removeprefix("/static/")).is_file(), f"missing: {ref}"
