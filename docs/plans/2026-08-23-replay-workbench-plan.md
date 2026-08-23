@@ -46,7 +46,7 @@ def test_tiledefs_carries_counts_summing_to_72(client: TestClient) -> None:
 **Step 4:** run → PASS; full `tests/web` green; ruff+mypy clean.
 **Step 5:** commit `feat(web): expose per-type tile count on /api/tiledefs` (+ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>).
 
-### Task 2: Replay 3-column workbench layout (restructure, no new content yet)
+### Task 2: Replay 3-column workbench layout (restructure, no new content yet) ✅ DONE (443a069)
 **Depends on:** none
 
 Rebuild `replay.html` + the layout half of `replay.js` + `style.css` into the
