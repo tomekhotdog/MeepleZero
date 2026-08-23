@@ -194,7 +194,7 @@ moment.
 clicking jumps. Screenshot.
 **Commit:** `feat(web): replay scrubber key-moment markers`.
 
-### Task 12: Final verification
+### Task 12: Final verification ✅ DONE (a957 review: 184 tests, all features verified both replays; perf fix 827b5c7)
 **Depends on:** all
 
 No new features. Headless full pass on TWO replays: (a) a checkpoint replay (real
@@ -219,6 +219,6 @@ Note: T3–T6, T8–T11 all edit the same replay files, so build them sequential
 (one implementer at a time). T1 and T7 touch different files and may go anytime.
 
 ## Review
-- [ ] Code review requested
-- [ ] All feedback addressed
-- [ ] Final verification passed
+- [x] Code review requested (RW-T12 holistic)
+- [x] All feedback addressed (chart dirty-flag)
+- [x] Final verification passed (184 tests, headless both replays)
