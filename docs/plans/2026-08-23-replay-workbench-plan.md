@@ -108,7 +108,7 @@ scored tiles highlight + "+N" shows; the placed tile is ringed; hovering a meepl
 shows the tooltip + feature highlight. Screenshot each.
 **Commit:** `feat(web): replay board overlays — move highlight, score spotlight, meeple hover`.
 
-### Task 5: Alternative-move ghosts (②) + toggle
+### Task 5: Alternative-move ghosts (②) + toggle ✅ DONE (3748d9c)
 **Depends on:** Task 2, Task 4 (chosen-move ring already drawn)
 
 Add a "Show alternatives" toggle in `#this-move` (off by default). When on and
