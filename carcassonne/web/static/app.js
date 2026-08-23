@@ -37,6 +37,13 @@ const S = {
   aiPulse: null, // {x, y, start} settle pulse on the AI's placed tile
   drag: null,
   error: null, // fatal fetch failure message; overrides the status line until a new game
+  lastHumanMove: null, // {x, y} of the human's most recent tile placement
+  lastAiMove: null, // {x, y} of the AI's most recent tile placement
+  highlightTiles: new Set(), // "x,y" keys highlighted by a clicked score row (F2)
+  highlightRow: null, // the currently-active score row button, or null
+  highlightColor: null, // scoring player's colour for the active highlight
+  meepleHits: [], // per-frame [{cx, cy, r, meeple}] for meeple hover hit-testing (F3)
+  hoverMeeple: null, // the meeple dict under the cursor, or null
 };
 
 // --- DOM ----------------------------------------------------------------------
@@ -44,11 +51,28 @@ const S = {
 const $ = (id) => document.getElementById(id);
 const board = $("board");
 const bctx = board.getContext("2d");
+const stage = $("stage");
 const lensCanvas = $("lens-canvas");
 const picker = $("picker");
 const dialog = $("dialog");
 const statusEl = $("status");
 const logEl = $("log");
+
+// Board-corner "reset view" control (F4) and meeple-hover tooltip (F3), built
+// here so the whole Play view stays in app.js + style.css.
+const resetViewBtn = document.createElement("button");
+resetViewBtn.id = "reset-view";
+resetViewBtn.type = "button";
+resetViewBtn.textContent = "⟳";
+resetViewBtn.setAttribute("aria-label", "Reset view — recentre the board");
+resetViewBtn.title = "Reset view";
+resetViewBtn.addEventListener("click", resetView);
+stage.append(resetViewBtn);
+
+const meepleTip = document.createElement("div");
+meepleTip.id = "meeple-tip";
+meepleTip.setAttribute("role", "tooltip");
+stage.append(meepleTip);
 
 // --- server calls ---------------------------------------------------------------
 
@@ -102,6 +126,10 @@ async function newGame(opponent, seat, seed) {
   S.pending = null;
   S.hint = null;
   S.aiPulse = null;
+  S.lastHumanMove = null;
+  S.lastAiMove = null;
+  S.hoverMeeple = null;
+  clearScoreHighlight();
   S.cam = { x: 0, y: 0, zoom: 1 };
   setRotation(0, true);
   logEl.replaceChildren();
@@ -115,6 +143,8 @@ async function newGame(opponent, seat, seed) {
 
 async function postMove(idx) {
   closePicker();
+  const chosen = S.legal.find((m) => m.idx === idx);
+  if (chosen) S.lastHumanMove = { x: chosen.x, y: chosen.y }; // F1: mark the human placement
   S.phase = "awaiting";
   S.hint = null;
   updateSidebar();
@@ -144,12 +174,15 @@ async function postMove(idx) {
   if (S.gameId !== gameId) return;
   S.view = data.state;
   for (const e of data.events) logScore(e);
-  if (data.ai_move && !reducedMotion.matches) {
-    S.aiPulse = {
-      x: data.ai_move.move.x,
-      y: data.ai_move.move.y,
-      start: performance.now(),
-    };
+  if (data.ai_move) {
+    S.lastAiMove = { x: data.ai_move.move.x, y: data.ai_move.move.y }; // F1: mark the AI placement
+    if (!reducedMotion.matches) {
+      S.aiPulse = {
+        x: data.ai_move.move.x,
+        y: data.ai_move.move.y,
+        start: performance.now(),
+      };
+    }
   }
   setRotation(0, true); // fresh tile drawn: reset the lens
   if (S.view.terminal) {
@@ -235,6 +268,54 @@ function render(now) {
   const c = drawTiles(bctx, board, S.view, S.tiledefs, S.cam);
   drawFrontier(bctx, board, S.view, S.cam);
 
+  // Record every drawn meeple's screen disc so pointermove can hit-test them (F3).
+  // Anchors are defined unrotated; drawTile rotates the box, so featureAnchor with
+  // the tile's rotation reproduces the on-screen position.
+  S.meepleHits = [];
+  for (const t of S.view.tiles) {
+    const def = S.tiledefs[t.type];
+    const { sx, sy } = worldToScreen(t.x, t.y);
+    for (const m of t.meeples ?? []) {
+      const a = featureAnchor(def, m.feature, t.rot);
+      S.meepleHits.push({ cx: sx - c / 2 + a.x * c, cy: sy - c / 2 + a.y * c, r: c * 0.1, meeple: m });
+    }
+  }
+
+  // (F2) Score-row highlight: fill + outline the clicked event's feature tiles in
+  // the scoring player's colour — distinct from the neutral meeple-hover outline.
+  if (S.highlightTiles.size > 0) {
+    const col = S.highlightColor ?? TOKENS.bone;
+    for (const key of S.highlightTiles) {
+      const [x, y] = key.split(",").map(Number);
+      const { sx, sy } = worldToScreen(x, y);
+      bctx.save();
+      bctx.globalAlpha = 0.18;
+      bctx.fillStyle = col;
+      bctx.fillRect(sx - c / 2 + 2, sy - c / 2 + 2, c - 4, c - 4);
+      bctx.restore();
+      bctx.strokeStyle = col;
+      bctx.lineWidth = 2.5;
+      bctx.strokeRect(sx - c / 2 + 2, sy - c / 2 + 2, c - 4, c - 4);
+    }
+  }
+
+  // (F3) Meeple-hover: neutral --bone outline around the hovered meeple's feature.
+  if (S.hoverMeeple) {
+    bctx.strokeStyle = TOKENS.bone;
+    bctx.lineWidth = 2;
+    bctx.setLineDash([2, 3]);
+    for (const [x, y] of S.hoverMeeple.feature_tiles) {
+      const { sx, sy } = worldToScreen(x, y);
+      bctx.strokeRect(sx - c / 2 + 2.5, sy - c / 2 + 2.5, c - 5, c - 5);
+    }
+    bctx.setLineDash([]);
+  }
+
+  // (F1) Persistent last-move markers: a solid ring in the mover's colour plus a
+  // labelled corner chip, so "your last move" vs "AI's last move" is unambiguous.
+  drawLastMove(S.lastHumanMove, playerToken(S.humanPlayer), "You", c);
+  drawLastMove(S.lastAiMove, playerToken(1 - S.humanPlayer), "AI", c);
+
   const placing = S.phase === "placing";
   const legalCells = new Map(); // cells legal at the CURRENT rotation
   if (placing) {
@@ -311,6 +392,49 @@ function render(now) {
 
   drawLens();
   requestAnimationFrame(render);
+}
+
+const playerToken = (p) => (p === 0 ? TOKENS.p0 : TOKENS.p1);
+
+// (F1) One persistent last-move marker: a solid ring in the mover's colour and a
+// small labelled chip in the tile's top-left corner ("You" / "AI").
+function drawLastMove(pos, color, label, c) {
+  if (!pos) return;
+  const { sx, sy } = worldToScreen(pos.x, pos.y);
+  const left = sx - c / 2;
+  const top = sy - c / 2;
+  bctx.save();
+  bctx.strokeStyle = color;
+  bctx.lineWidth = 3;
+  bctx.strokeRect(left + 1.5, top + 1.5, c - 3, c - 3);
+  // Corner chip with the mover's label.
+  bctx.font = `600 ${Math.max(8, c * 0.16)}px ${getComputedStyle(document.body).getPropertyValue("--ui") || "sans-serif"}`;
+  const pad = Math.max(2, c * 0.04);
+  const tw = bctx.measureText(label).width;
+  const chipH = Math.max(11, c * 0.22);
+  const chipW = tw + pad * 2;
+  bctx.fillStyle = color;
+  bctx.fillRect(left + 1.5, top + 1.5, chipW, chipH);
+  bctx.fillStyle = TOKENS.ink;
+  bctx.textBaseline = "middle";
+  bctx.textAlign = "left";
+  bctx.fillText(label, left + 1.5 + pad, top + 1.5 + chipH / 2 + 0.5);
+  bctx.restore();
+}
+
+// (F4) Recentre the camera on the board's bounding-box centre at zoom 1.
+function resetView() {
+  if (!S.view || S.view.tiles.length === 0) {
+    S.cam = { x: 0, y: 0, zoom: 1 };
+    return;
+  }
+  const xs = S.view.tiles.map((t) => t.x);
+  const ys = S.view.tiles.map((t) => t.y);
+  S.cam = {
+    x: (Math.min(...xs) + Math.max(...xs)) / 2,
+    y: (Math.min(...ys) + Math.max(...ys)) / 2,
+    zoom: 1,
+  };
 }
 
 // --- radial meeple picker ---------------------------------------------------------------
@@ -421,6 +545,7 @@ board.addEventListener("pointermove", (e) => {
     if (S.drag.moved || Math.hypot(dx, dy) > 4) {
       S.drag.moved = true;
       board.classList.add("dragging");
+      clearMeepleHover();
       const c = cellPx();
       S.cam.x -= dx / c;
       S.cam.y += dy / c; // screen y down = world south
@@ -429,6 +554,7 @@ board.addEventListener("pointermove", (e) => {
     }
   } else {
     S.hover = screenToCell(e.clientX - rect.left, e.clientY - rect.top);
+    updateMeepleHover(e.clientX - rect.left, e.clientY - rect.top);
   }
 });
 
@@ -437,6 +563,7 @@ board.addEventListener("pointerup", (e) => {
   S.drag = null;
   board.classList.remove("dragging");
   if (!wasDrag) {
+    clearScoreHighlight(); // clicking the board clears any score-row highlight (F2)
     const rect = board.getBoundingClientRect();
     cellClick(e.clientX - rect.left, e.clientY - rect.top);
   }
@@ -444,7 +571,53 @@ board.addEventListener("pointerup", (e) => {
 
 board.addEventListener("pointerleave", () => {
   S.hover = null;
+  clearMeepleHover();
 });
+
+// (F3) Find the placed meeple under the cursor (if any) and drive the tooltip.
+function updateMeepleHover(px, py) {
+  let found = null;
+  for (const hit of S.meepleHits) {
+    if (Math.hypot(px - hit.cx, py - hit.cy) <= hit.r + 3) {
+      found = hit;
+      break;
+    }
+  }
+  if (!found) {
+    clearMeepleHover();
+    return;
+  }
+  S.hoverMeeple = found.meeple;
+  showMeepleTip(found.meeple, px, py);
+}
+
+function clearMeepleHover() {
+  S.hoverMeeple = null;
+  meepleTip.classList.remove("show");
+}
+
+function showMeepleTip(m, px, py) {
+  const kind = document.createElement("div");
+  kind.className = "tip-kind";
+  kind.textContent = m.feature_kind;
+  const now = document.createElement("div");
+  now.textContent = `score now: ${m.score_now}`;
+  const rest = document.createElement("div");
+  rest.textContent = m.complete ? "complete" : `if completed: ${m.score_potential}`;
+  meepleTip.replaceChildren(kind, now, rest);
+  meepleTip.classList.add("show");
+  // Offset from the cursor, clamped inside the stage so nothing gets clipped.
+  const sw = stage.clientWidth;
+  const sh = stage.clientHeight;
+  const tw = meepleTip.offsetWidth;
+  const th = meepleTip.offsetHeight;
+  let left = px + 16;
+  let top = py + 16;
+  if (left + tw > sw) left = px - tw - 16;
+  if (top + th > sh) top = py - th - 16;
+  meepleTip.style.left = `${Math.max(4, left)}px`;
+  meepleTip.style.top = `${Math.max(4, top)}px`;
+}
 
 board.addEventListener(
   "wheel",
@@ -541,18 +714,51 @@ function logMeta(text) {
   logLine([text], "meta");
 }
 
+// (F2) Each score event is a clickable/keyboard-activatable row. Clicking it
+// highlights the event's feature tiles on the board; clicking it again clears.
 function logScore(e) {
   const mine = e.player === S.humanPlayer;
   const who = mine ? "You" : "AI";
   const n = e.tiles.length;
-  const text = `${who} scored ${e.points} — ${e.kind} (${n} tile${n === 1 ? "" : "s"})`;
-  if (mine) {
-    logLine([text]);
-  } else {
-    const dot = document.createElement("span");
-    dot.className = "ai-dot";
-    logLine([dot, text]);
+
+  const row = document.createElement("button");
+  row.type = "button";
+  row.className = `score-row ${mine ? "p0" : "p1"}`;
+  row.style.setProperty("--tint", mine ? "var(--p0)" : "var(--p1)");
+
+  const pts = document.createElement("span");
+  pts.className = "pts";
+  pts.textContent = `+${e.points}`;
+
+  const lbl = document.createElement("span");
+  lbl.className = "lbl";
+  lbl.textContent = `${who} · ${e.kind} · ${n} tile${n === 1 ? "" : "s"}`;
+
+  row.append(pts, lbl);
+  const color = mine ? TOKENS.p0 : TOKENS.p1;
+  const tiles = e.tiles;
+  row.addEventListener("click", () => toggleScoreHighlight(row, tiles, color));
+  logEl.append(row);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+function toggleScoreHighlight(row, tiles, color) {
+  if (S.highlightRow === row) {
+    clearScoreHighlight();
+    return;
   }
+  clearScoreHighlight();
+  S.highlightRow = row;
+  S.highlightColor = color;
+  S.highlightTiles = new Set(tiles.map(([x, y]) => `${x},${y}`));
+  row.classList.add("active");
+}
+
+function clearScoreHighlight() {
+  if (S.highlightRow) S.highlightRow.classList.remove("active");
+  S.highlightRow = null;
+  S.highlightColor = null;
+  S.highlightTiles = new Set();
 }
 
 // --- new game dialog ----------------------------------------------------------------------------------

@@ -829,3 +829,84 @@ dialog .actions {
     transition: none;
   }
 }
+
+/* --- playtest feedback features (F2/F3/F4) --------------------------------- */
+
+/* F4: reset-view button, bottom-right over the board. */
+#reset-view {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  width: 34px;
+  height: 34px;
+  font-size: 18px;
+  line-height: 1;
+  color: var(--bone-dim);
+  background: var(--stage-raised);
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  cursor: pointer;
+}
+#reset-view:hover {
+  color: var(--bone);
+  border-color: var(--bone-dim);
+}
+
+/* F3: meeple hover tooltip. Positioned inline (left/top) by app.js. */
+#meeple-tip {
+  position: absolute;
+  z-index: 5;
+  display: none;
+  pointer-events: none;
+  max-width: 180px;
+  padding: 7px 9px;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--bone-dim);
+  background: var(--stage-raised);
+  border: 1px solid var(--hairline);
+  border-radius: 5px;
+}
+#meeple-tip.show {
+  display: block;
+}
+#meeple-tip .tip-kind {
+  color: var(--bone);
+  text-transform: capitalize;
+  margin-bottom: 2px;
+}
+
+/* F2: score-log rows — one per scoring event, tinted by the scoring player. */
+.score-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  margin: 2px 0;
+  padding: 4px 8px;
+  text-align: left;
+  cursor: pointer;
+  color: var(--bone);
+  font-family: var(--mono);
+  font-size: 11px;
+  border: 1px solid transparent;
+  border-left: 3px solid var(--tint);
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--tint) 12%, var(--stage));
+}
+.score-row:hover {
+  background: color-mix(in srgb, var(--tint) 20%, var(--stage));
+}
+.score-row.active {
+  border-color: var(--tint);
+}
+.score-row .pts {
+  font-family: var(--serif);
+  font-size: 14px;
+  color: var(--tint);
+  min-width: 28px;
+}
+.score-row .lbl {
+  color: var(--bone-dim);
+}
