@@ -173,7 +173,7 @@ fetched for drawing) — reuse.
 forward; current tile flagged. Screenshot.
 **Commit:** `feat(web): replay deck tracker (tiles played/remaining by type)`.
 
-### Task 10: Meeple supply (⑦)
+### Task 10: Meeple supply (⑦) ✅ DONE (22aef3d)
 **Depends on:** Task 2
 
 In `#supply-panel`: each player's meeple pips + abbot glyph at the current step
