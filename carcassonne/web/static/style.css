@@ -614,6 +614,80 @@ dialog .actions {
   display: none;
 }
 
+/* Move list — one compact row per move, filling the rail below the picker.
+   Built once per replay; scrubbing only toggles `.current` + auto-scrolls.
+   The list owns the vertical scroll so the picker panel stays pinned. */
+#move-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+#move-list:empty {
+  display: none;
+}
+.move-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 3px 6px;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--bone);
+  font-family: var(--mono);
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+}
+.move-row:hover {
+  background: var(--stage);
+  border-color: var(--hairline);
+}
+.move-row:focus-visible {
+  outline: 2px solid var(--bone);
+  outline-offset: -1px;
+}
+.move-row.current {
+  background: var(--stage);
+  border-color: var(--bone-dim);
+}
+.move-row .swatch {
+  margin-right: 0;
+  flex: none;
+}
+.move-n {
+  width: 22px;
+  flex: none;
+  text-align: right;
+  color: var(--bone-dim);
+}
+.move-row.current .move-n {
+  color: var(--bone);
+}
+.move-tile {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.move-d {
+  flex: none;
+  min-width: 20px;
+  text-align: right;
+  color: var(--bone-dim);
+}
+.event-dot {
+  flex: none;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--bone-dim);
+}
+
 /* Scrubber. */
 .scrub-head {
   display: flex;

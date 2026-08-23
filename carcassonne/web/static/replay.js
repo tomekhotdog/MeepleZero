@@ -18,6 +18,7 @@ const R = {
   tiledefs: null,
   data: null, // full /api/replays/{name} response
   index: 0, // current position: 0..moves.length
+  moveRows: null, // <button> per move, built once per replay; index-aligned to moves
   winprob: [], // per-move {p: prob for player 0, known: bool}, length moves.length
   cam: { x: 0, y: 0, zoom: 1 },
   drag: null,
@@ -90,6 +91,7 @@ async function loadReplay(name) {
   }
   R.cam = { x: 0, y: 0, zoom: 1 };
   buildWinProb();
+  buildMoveList();
   const M = R.data.moves.length;
   const slider = $("slider");
   slider.max = String(M);
@@ -115,6 +117,7 @@ function setIndex(i) {
   $("position").textContent = R.index < M ? `move ${R.index + 1} / ${M}` : `final / ${M}`;
   renderMoveInfo();
   renderSearchPanel();
+  updateMoveHighlight();
 }
 
 function step(delta) {
@@ -146,6 +149,74 @@ function stopAutoplay() {
   $("play").textContent = "▶";
   if (R.timer) clearInterval(R.timer);
   R.timer = null;
+}
+
+// --- move list (left rail) ---------------------------------------------------
+
+// Built once per replay; scrubbing only toggles `.current` + auto-scrolls, so
+// the DOM isn't rebuilt every frame. Rows are chronological (move 1 at top),
+// index-aligned to R.data.moves so R.index maps straight to R.moveRows[i].
+function buildMoveList() {
+  const list = $("move-list");
+  const rows = [];
+  const M = moves().length;
+  for (let i = 0; i < M; i++) {
+    const rec = R.data.moves[i];
+    const before = R.data.states[i].scores;
+    const after = R.data.states[i + 1].scores;
+    const delta = after[rec.player] - before[rec.player];
+    const scored = (R.data.states[i + 1].last_events ?? []).length > 0;
+
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "move-row";
+    row.dataset.index = String(i);
+
+    const num = document.createElement("span");
+    num.className = "move-n";
+    num.textContent = String(rec.n);
+
+    const tile = document.createElement("span");
+    tile.className = "move-tile";
+    tile.textContent = rec.tile;
+    tile.title = rec.tile;
+
+    const d = document.createElement("span");
+    d.className = "move-d";
+    if (delta > 0) d.textContent = `+${delta}`;
+
+    row.append(num, swatch(rec.player), tile, d);
+    if (scored) {
+      const dot = document.createElement("span");
+      dot.className = "event-dot";
+      dot.setAttribute("aria-hidden", "true");
+      dot.title = "something scored this move";
+      row.append(dot);
+    }
+    row.addEventListener("click", () => {
+      stopAutoplay();
+      setIndex(i);
+    });
+    rows.push(row);
+  }
+  list.replaceChildren(...rows);
+  R.moveRows = rows;
+}
+
+// Sync the highlight + scroll with R.index. The current move is the one about
+// to be applied (R.index); at the terminal position (R.index === M) no row is
+// current.
+function updateMoveHighlight() {
+  const rows = R.moveRows;
+  if (!rows) return;
+  for (let i = 0; i < rows.length; i++) {
+    const on = i === R.index;
+    rows[i].classList.toggle("current", on);
+    if (on) rows[i].setAttribute("aria-current", "true");
+    else rows[i].removeAttribute("aria-current");
+  }
+  const active = rows[R.index];
+  if (active) active.scrollIntoView({ block: "nearest" });
 }
 
 // --- move info ---------------------------------------------------------------
@@ -458,6 +529,7 @@ document.addEventListener("keydown", (e) => {
     stopAutoplay();
     setIndex(moves().length);
   } else if (e.key === " ") {
+    if (e.target.closest(".move-row")) return; // let a focused move row self-activate
     e.preventDefault();
     toggleAutoplay();
   } else {
@@ -476,6 +548,8 @@ function hidePanels() {
   for (const id of ["scrubber", "move-info", "search-panel", "winprob-panel"]) {
     $(id).hidden = true;
   }
+  $("move-list").replaceChildren();
+  R.moveRows = null;
   $("empty-hint").style.display = "";
 }
 
