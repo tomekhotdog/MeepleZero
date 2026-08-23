@@ -1271,9 +1271,16 @@ dialog .actions {
 /* --- Tiles reference (atlas) ------------------------------------------------ */
 /* Reserved: does NOT use --ai (AI-analysis surfaces only). */
 /* The app shell sets body{overflow:hidden}; this page is a long document, so it
-   must be its own scroll container (it IS #app, flex:1 with min-height:0). */
-.atlas { display: block; overflow-y: auto; max-width: 1100px; margin: 0 auto; padding: 24px 20px 64px; }
+   must be its own scroll container. #app.atlas (specificity 110) beats the
+   #app{display:flex} shell rule (100) — a plain .atlas would lose and the page
+   would render as a flex row. */
+#app.atlas { display: block; overflow-y: auto; }
+.atlas { max-width: 1100px; margin: 0 auto; padding: 24px 20px 64px; }
 .atlas #atlas-head { margin-bottom: 8px; }
+/* Group sections laid out in two parallel columns; each column's card grid
+   flows within it. Collapses to one column on narrow viewports. */
+.atlas #groups { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 28px; align-items: start; }
+@media (max-width: 720px) { .atlas #groups { grid-template-columns: 1fr; } }
 .atlas h1 { font-family: var(--serif); font-size: 28px; margin: 0 0 8px; }
 .atlas .summary { font-family: var(--mono); color: var(--bone); opacity: 0.85; margin-bottom: 16px; }
 .atlas .legend { background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; padding: 12px 16px; font-size: 13px; }
@@ -1281,7 +1288,7 @@ dialog .actions {
 .atlas .legend ul { margin: 6px 0 0; padding-left: 18px; }
 .atlas .legend li { margin: 2px 0; }
 .atlas .error { color: var(--p1); margin-top: 8px; }
-.atlas .group { margin-top: 32px; }
+.atlas .group { margin-top: 16px; }
 .atlas .group h2 { font-family: var(--serif); font-size: 20px; margin: 0 0 2px; }
 .atlas .group h2 .meta { font-family: var(--mono); font-size: 12px; opacity: 0.6; font-weight: normal; }
 .atlas .group .blurb { margin: 0 0 14px; font-size: 13px; opacity: 0.7; }
