@@ -30,6 +30,11 @@ import {
 
 const AUTOPLAY_MS = 1000;
 
+// The win-prob and score charts only change on scrub/load/resize, so they're
+// redrawn on demand (via this flag, consumed in the render loop) rather than
+// every animation frame — the board needs the rAF loop for pan/zoom, the charts don't.
+let chartsDirty = true;
+
 // --- state -------------------------------------------------------------------
 
 const R = {
@@ -168,6 +173,7 @@ function setIndex(i) {
   // The current move is the just-played one: moves[R.index - 1]. At R.index 0
   // no move has been played yet (start position).
   $("position").textContent = R.index === 0 ? `start / ${M}` : `move ${R.index} / ${M}`;
+  chartsDirty = true; // marker moved → charts need a redraw
   clearMeepleHover(); // a moved board makes any hovered feature stale
   clearGhostHover(); // and any hovered ghost from the previous position
   renderMoveInfo();
@@ -1062,8 +1068,13 @@ function render() {
       drawScoreFloat(ev.tiles, ev.points, playerColor(ev.player));
     }
 
-    drawWinProb();
-    drawScore();
+    // Charts only depend on R.winprob/R.scores/R.index (scrub/load), not on the
+    // per-frame board pan/zoom — redraw them only when marked dirty, not 60x/s.
+    if (chartsDirty) {
+      drawWinProb();
+      drawScore();
+      chartsDirty = false;
+    }
   }
   requestAnimationFrame(render);
 }
@@ -1219,6 +1230,10 @@ $("alt-toggle").addEventListener("change", (e) => {
   R.showAlts = e.target.checked;
   clearGhostHover();
   renderAltPanel(); // refresh the note now the toggle changed
+});
+
+window.addEventListener("resize", () => {
+  chartsDirty = true; // canvases are responsive; redraw at the new size
 });
 
 document.addEventListener("keydown", (e) => {
