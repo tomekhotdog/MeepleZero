@@ -49,6 +49,9 @@ function noteFor(def) {
     const n = cities[0].edges.length;
     parts.push(n === 1 ? "City edge" : n === 4 ? "City (all sides)" : `City (${n} sides)`);
   }
+  // Shield doubles a city's score; surface it in the note so it also reaches the
+  // card's aria-label (the visual badge alone is invisible to screen readers).
+  if (cities.some((f) => f.shield)) parts.push("Shield");
   if (roads.length >= 3) {
     parts.push(roads.length === 4 ? "Crossroads" : "T-junction");
   } else if (roads.length === 2) {
