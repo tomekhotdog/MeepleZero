@@ -14,6 +14,16 @@ import {
   drawTiles,
   drawFrontier,
 } from "./board.js";
+import {
+  drawMoveRing,
+  drawTileHighlight,
+  drawFeatureOutline,
+  collectMeepleHits,
+  hitTestMeeple,
+  createMeepleTip,
+  showMeepleTip as showTip,
+  hideMeepleTip,
+} from "./overlays.js";
 
 const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 
@@ -69,10 +79,7 @@ resetViewBtn.title = "Reset view";
 resetViewBtn.addEventListener("click", resetView);
 stage.append(resetViewBtn);
 
-const meepleTip = document.createElement("div");
-meepleTip.id = "meeple-tip";
-meepleTip.setAttribute("role", "tooltip");
-stage.append(meepleTip);
+const meepleTip = createMeepleTip(stage);
 
 // --- server calls ---------------------------------------------------------------
 
@@ -269,52 +276,23 @@ function render(now) {
   drawFrontier(bctx, board, S.view, S.cam);
 
   // Record every drawn meeple's screen disc so pointermove can hit-test them (F3).
-  // Anchors are defined unrotated; drawTile rotates the box, so featureAnchor with
-  // the tile's rotation reproduces the on-screen position.
-  S.meepleHits = [];
-  for (const t of S.view.tiles) {
-    const def = S.tiledefs[t.type];
-    const { sx, sy } = worldToScreen(t.x, t.y);
-    for (const m of t.meeples ?? []) {
-      const a = featureAnchor(def, m.feature, t.rot);
-      S.meepleHits.push({ cx: sx - c / 2 + a.x * c, cy: sy - c / 2 + a.y * c, r: c * 0.1, meeple: m });
-    }
-  }
+  S.meepleHits = collectMeepleHits(S.view, S.tiledefs, board, S.cam);
 
   // (F2) Score-row highlight: fill + outline the clicked event's feature tiles in
   // the scoring player's colour — distinct from the neutral meeple-hover outline.
   if (S.highlightTiles.size > 0) {
-    const col = S.highlightColor ?? TOKENS.bone;
-    for (const key of S.highlightTiles) {
-      const [x, y] = key.split(",").map(Number);
-      const { sx, sy } = worldToScreen(x, y);
-      bctx.save();
-      bctx.globalAlpha = 0.18;
-      bctx.fillStyle = col;
-      bctx.fillRect(sx - c / 2 + 2, sy - c / 2 + 2, c - 4, c - 4);
-      bctx.restore();
-      bctx.strokeStyle = col;
-      bctx.lineWidth = 2.5;
-      bctx.strokeRect(sx - c / 2 + 2, sy - c / 2 + 2, c - 4, c - 4);
-    }
+    drawTileHighlight(bctx, board, S.cam, S.highlightTiles, S.highlightColor);
   }
 
   // (F3) Meeple-hover: neutral --bone outline around the hovered meeple's feature.
   if (S.hoverMeeple) {
-    bctx.strokeStyle = TOKENS.bone;
-    bctx.lineWidth = 2;
-    bctx.setLineDash([2, 3]);
-    for (const [x, y] of S.hoverMeeple.feature_tiles) {
-      const { sx, sy } = worldToScreen(x, y);
-      bctx.strokeRect(sx - c / 2 + 2.5, sy - c / 2 + 2.5, c - 5, c - 5);
-    }
-    bctx.setLineDash([]);
+    drawFeatureOutline(bctx, board, S.cam, S.hoverMeeple.feature_tiles);
   }
 
   // (F1) Persistent last-move markers: a solid ring in the mover's colour plus a
   // labelled corner chip, so "your last move" vs "AI's last move" is unambiguous.
-  drawLastMove(S.lastHumanMove, playerToken(S.humanPlayer), "You", c);
-  drawLastMove(S.lastAiMove, playerToken(1 - S.humanPlayer), "AI", c);
+  drawMoveRing(bctx, board, S.cam, S.lastHumanMove, playerToken(S.humanPlayer), "You");
+  drawMoveRing(bctx, board, S.cam, S.lastAiMove, playerToken(1 - S.humanPlayer), "AI");
 
   const placing = S.phase === "placing";
   const legalCells = new Map(); // cells legal at the CURRENT rotation
@@ -395,32 +373,6 @@ function render(now) {
 }
 
 const playerToken = (p) => (p === 0 ? TOKENS.p0 : TOKENS.p1);
-
-// (F1) One persistent last-move marker: a solid ring in the mover's colour and a
-// small labelled chip in the tile's top-left corner ("You" / "AI").
-function drawLastMove(pos, color, label, c) {
-  if (!pos) return;
-  const { sx, sy } = worldToScreen(pos.x, pos.y);
-  const left = sx - c / 2;
-  const top = sy - c / 2;
-  bctx.save();
-  bctx.strokeStyle = color;
-  bctx.lineWidth = 3;
-  bctx.strokeRect(left + 1.5, top + 1.5, c - 3, c - 3);
-  // Corner chip with the mover's label.
-  bctx.font = `600 ${Math.max(8, c * 0.16)}px ${getComputedStyle(document.body).getPropertyValue("--ui") || "sans-serif"}`;
-  const pad = Math.max(2, c * 0.04);
-  const tw = bctx.measureText(label).width;
-  const chipH = Math.max(11, c * 0.22);
-  const chipW = tw + pad * 2;
-  bctx.fillStyle = color;
-  bctx.fillRect(left + 1.5, top + 1.5, chipW, chipH);
-  bctx.fillStyle = TOKENS.ink;
-  bctx.textBaseline = "middle";
-  bctx.textAlign = "left";
-  bctx.fillText(label, left + 1.5 + pad, top + 1.5 + chipH / 2 + 0.5);
-  bctx.restore();
-}
 
 // (F4) Recentre the camera on the board's bounding-box centre at zoom 1.
 function resetView() {
@@ -576,47 +528,18 @@ board.addEventListener("pointerleave", () => {
 
 // (F3) Find the placed meeple under the cursor (if any) and drive the tooltip.
 function updateMeepleHover(px, py) {
-  let found = null;
-  for (const hit of S.meepleHits) {
-    if (Math.hypot(px - hit.cx, py - hit.cy) <= hit.r + 3) {
-      found = hit;
-      break;
-    }
-  }
+  const found = hitTestMeeple(S.meepleHits, px, py);
   if (!found) {
     clearMeepleHover();
     return;
   }
-  S.hoverMeeple = found.meeple;
-  showMeepleTip(found.meeple, px, py);
+  S.hoverMeeple = found;
+  showTip(meepleTip, stage, found, px, py);
 }
 
 function clearMeepleHover() {
   S.hoverMeeple = null;
-  meepleTip.classList.remove("show");
-}
-
-function showMeepleTip(m, px, py) {
-  const kind = document.createElement("div");
-  kind.className = "tip-kind";
-  kind.textContent = m.feature_kind;
-  const now = document.createElement("div");
-  now.textContent = `score now: ${m.score_now}`;
-  const rest = document.createElement("div");
-  rest.textContent = m.complete ? "complete" : `if completed: ${m.score_potential}`;
-  meepleTip.replaceChildren(kind, now, rest);
-  meepleTip.classList.add("show");
-  // Offset from the cursor, clamped inside the stage so nothing gets clipped.
-  const sw = stage.clientWidth;
-  const sh = stage.clientHeight;
-  const tw = meepleTip.offsetWidth;
-  const th = meepleTip.offsetHeight;
-  let left = px + 16;
-  let top = py + 16;
-  if (left + tw > sw) left = px - tw - 16;
-  if (top + th > sh) top = py - th - 16;
-  meepleTip.style.left = `${Math.max(4, left)}px`;
-  meepleTip.style.top = `${Math.max(4, top)}px`;
+  hideMeepleTip(meepleTip);
 }
 
 board.addEventListener(

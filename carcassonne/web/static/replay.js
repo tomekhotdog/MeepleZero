@@ -8,7 +8,25 @@
 // and states[moves.length] is the terminal position. moves[i] is applied to
 // states[i] to reach states[i+1].
 
-import { resizeToDisplay, drawTiles, drawFrontier, cellPx, screenToCellFloat } from "./board.js";
+import {
+  resizeToDisplay,
+  drawTiles,
+  drawFrontier,
+  cellPx,
+  screenToCellFloat,
+  worldToScreen,
+} from "./board.js";
+import { TOKENS, featureAnchor } from "./tiles.js";
+import {
+  drawMoveRing,
+  drawTileHighlight,
+  drawFeatureOutline,
+  collectMeepleHits,
+  hitTestMeeple,
+  createMeepleTip,
+  showMeepleTip,
+  hideMeepleTip,
+} from "./overlays.js";
 
 const AUTOPLAY_MS = 1000;
 
@@ -24,6 +42,8 @@ const R = {
   drag: null,
   playing: false,
   timer: null,
+  meepleHits: [], // per-frame [{cx, cy, r, meeple}] for meeple hover hit-testing
+  hoverMeeple: null, // the meeple dict under the cursor, or null
 };
 
 // --- DOM ---------------------------------------------------------------------
@@ -33,6 +53,13 @@ const board = $("board");
 const bctx = board.getContext("2d");
 const winCanvas = $("winprob");
 const select = $("replay-select");
+const stage = $("stage");
+// The meeple-hover tooltip lives in the stage (same as the play view); the
+// #meeple-tip CSS is global so it matches. replay.html is a separate page, so
+// we build the element here.
+const meepleTip = createMeepleTip(stage);
+
+const playerColor = (p) => (p === 0 ? TOKENS.p0 : TOKENS.p1);
 
 // --- server calls ------------------------------------------------------------
 
@@ -115,6 +142,7 @@ function setIndex(i) {
   R.index = Math.max(0, Math.min(M, i));
   $("slider").value = String(R.index);
   $("position").textContent = R.index < M ? `move ${R.index + 1} / ${M}` : `final / ${M}`;
+  clearMeepleHover(); // a moved board makes any hovered feature stale
   renderMoveInfo();
   renderSearchPanel();
   updateMoveHighlight();
@@ -445,6 +473,11 @@ function winProbClick(e) {
 
 // --- board rendering ---------------------------------------------------------
 
+// The board at R.index is states[R.index] — the position BEFORE move R.index,
+// i.e. the position PRODUCED by move R.index-1. So both overlays key off that
+// previous move: ① rings the tile it placed, ④ spotlights what it scored
+// (states[R.index].last_events). Stepping Next thus rings the just-added tile
+// and lights up what it scored, together. At index 0 there is no prior move.
 function render() {
   const { w, h } = resizeToDisplay(board, bctx);
   bctx.clearRect(0, 0, w, h);
@@ -452,9 +485,95 @@ function render() {
     const view = R.data.states[R.index];
     drawTiles(bctx, board, view, R.tiledefs, R.cam);
     drawFrontier(bctx, board, view, R.cam);
+
+    // Record meeple discs so pointermove can hit-test them.
+    R.meepleHits = collectMeepleHits(view, R.tiledefs, board, R.cam);
+
+    // (④) Score-event spotlight: highlight the tiles that scored to reach this
+    // board, in the scoring player's colour.
+    const events = view.last_events ?? [];
+    for (const ev of events) {
+      const keys = ev.tiles.map(([x, y]) => `${x},${y}`);
+      drawTileHighlight(bctx, board, R.cam, keys, playerColor(ev.player));
+    }
+
+    // (①) Ring the tile placed by the move that produced this board.
+    if (R.index >= 1) {
+      const rec = R.data.moves[R.index - 1];
+      const color = playerColor(rec.player);
+      drawMoveRing(bctx, board, R.cam, rec.move, color);
+      markPlacedMeeple(view, rec.move, color); // if the move also placed a meeple
+    }
+
+    // (F3) Hovered meeple's feature outline, over the highlights.
+    if (R.hoverMeeple) {
+      drawFeatureOutline(bctx, board, R.cam, R.hoverMeeple.feature_tiles);
+    }
+
+    // (④) Float a small +N over each scoring event's tiles, on top of everything.
+    for (const ev of events) {
+      drawScoreFloat(ev.tiles, ev.points, playerColor(ev.player));
+    }
+
     drawWinProb();
   }
   requestAnimationFrame(render);
+}
+
+// (①) Emphasise a meeple the just-played move placed: a thin ring in the mover's
+// colour around the meeple's anchor on its tile.
+function markPlacedMeeple(view, mv, color) {
+  const a = mv.action;
+  if (!a || a.type !== "meeple") return;
+  const tile = view.tiles.find((t) => t.x === mv.x && t.y === mv.y);
+  if (!tile) return;
+  const def = R.tiledefs[tile.type];
+  const anchor = featureAnchor(def, a.feature, tile.rot);
+  const c = cellPx(R.cam);
+  const { sx, sy } = worldToScreen(board, R.cam, tile.x, tile.y);
+  bctx.save();
+  bctx.strokeStyle = color;
+  bctx.lineWidth = 2;
+  bctx.beginPath();
+  bctx.arc(sx - c / 2 + anchor.x * c, sy - c / 2 + anchor.y * c, c * 0.16, 0, 2 * Math.PI);
+  bctx.stroke();
+  bctx.restore();
+}
+
+// (④) A small "+N" chip centred over an event's tiles, in the scoring colour.
+function drawScoreFloat(tiles, points, color) {
+  if (tiles.length === 0) return;
+  let sx = 0;
+  let sy = 0;
+  for (const [x, y] of tiles) {
+    const p = worldToScreen(board, R.cam, x, y);
+    sx += p.sx;
+    sy += p.sy;
+  }
+  sx /= tiles.length;
+  sy /= tiles.length;
+  const c = cellPx(R.cam);
+  const text = `+${points}`;
+  bctx.save();
+  bctx.font = `700 ${Math.max(11, c * 0.24)}px ${getComputedStyle(document.body).getPropertyValue("--ui") || "sans-serif"}`;
+  bctx.textAlign = "center";
+  bctx.textBaseline = "middle";
+  const tw = bctx.measureText(text).width;
+  const padX = Math.max(4, c * 0.08);
+  const chipH = Math.max(14, c * 0.3);
+  const chipW = tw + padX * 2;
+  bctx.fillStyle = "rgba(20, 24, 30, 0.82)";
+  bctx.strokeStyle = color;
+  bctx.lineWidth = 1.5;
+  const left = sx - chipW / 2;
+  const top = sy - chipH / 2;
+  bctx.beginPath();
+  bctx.roundRect(left, top, chipW, chipH, Math.min(6, chipH / 2));
+  bctx.fill();
+  bctx.stroke();
+  bctx.fillStyle = color;
+  bctx.fillText(text, sx, sy + 0.5);
+  bctx.restore();
 }
 
 // --- board pan / zoom (view-only) --------------------------------------------
@@ -466,13 +585,36 @@ board.addEventListener("pointerdown", (e) => {
 });
 
 board.addEventListener("pointermove", (e) => {
-  if (!R.drag) return;
-  const c = cellPx(R.cam);
-  R.cam.x -= (e.clientX - R.drag.px) / c;
-  R.cam.y += (e.clientY - R.drag.py) / c; // screen y down = world south
-  R.drag.px = e.clientX;
-  R.drag.py = e.clientY;
+  const rect = board.getBoundingClientRect();
+  if (R.drag) {
+    clearMeepleHover();
+    const c = cellPx(R.cam);
+    R.cam.x -= (e.clientX - R.drag.px) / c;
+    R.cam.y += (e.clientY - R.drag.py) / c; // screen y down = world south
+    R.drag.px = e.clientX;
+    R.drag.py = e.clientY;
+    return;
+  }
+  updateMeepleHover(e.clientX - rect.left, e.clientY - rect.top);
 });
+
+board.addEventListener("pointerleave", clearMeepleHover);
+
+// Find the meeple under the cursor (if any) and drive the hover tooltip.
+function updateMeepleHover(px, py) {
+  const found = hitTestMeeple(R.meepleHits, px, py);
+  if (!found) {
+    clearMeepleHover();
+    return;
+  }
+  R.hoverMeeple = found;
+  showMeepleTip(meepleTip, stage, found, px, py);
+}
+
+function clearMeepleHover() {
+  R.hoverMeeple = null;
+  hideMeepleTip(meepleTip);
+}
 
 const endDrag = () => {
   R.drag = null;

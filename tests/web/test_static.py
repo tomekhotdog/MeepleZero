@@ -46,6 +46,7 @@ def test_replay_page_served(client: TestClient) -> None:
     [
         ("app.js", "javascript"),
         ("board.js", "javascript"),
+        ("overlays.js", "javascript"),
         ("replay.js", "javascript"),
         ("training.js", "javascript"),
         ("tiles.js", "javascript"),
@@ -74,7 +75,9 @@ def test_page_references_only_existing_files(page: str) -> None:
         assert (STATIC_DIR / ref.removeprefix("/static/")).is_file(), f"missing: {ref}"
 
 
-@pytest.mark.parametrize("name", ["app.js", "board.js", "replay.js", "training.js", "tiles.js"])
+@pytest.mark.parametrize(
+    "name", ["app.js", "board.js", "overlays.js", "replay.js", "training.js", "tiles.js"]
+)
 def test_js_syntax(name: str, tmp_path: Path) -> None:
     node = shutil.which("node")
     if node is None:
