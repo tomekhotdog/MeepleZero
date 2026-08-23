@@ -150,7 +150,7 @@ Screenshot. `node --check` app.js.
 
 ## Pass B — game-wide visibility
 
-### Task 8: Running score + score-over-time chart (③)
+### Task 8: Running score + score-over-time chart (③) ✅ DONE (597cff8)
 **Depends on:** Task 2
 
 In `#score-panel` (this-game): a big `P0 : P1` readout at the current step, plus a
