@@ -161,7 +161,7 @@ scores), current-move marker, distinct colours per player (`--p0`/`--p1`, NOT
 marker; clicking is not required. Screenshot.
 **Commit:** `feat(web): replay running score + score-over-time chart`.
 
-### Task 9: Deck tracker (⑤)
+### Task 9: Deck tracker (⑤) ✅ DONE (7650619)
 **Depends on:** Task 2, Task 1
 
 In `#deck-panel`: header "N/72 placed · M remaining"; a compact grid of tile
