@@ -89,7 +89,7 @@ Rows keyboard-activatable (button/role) + focus-visible. Score Δ from
 current row highlighted + scrolled into view. Screenshot.
 **Commit:** `feat(web): replay move-list rail with jump-to-move`.
 
-### Task 4: Board overlays — current-move highlight (①), score-event spotlight (④), meeple hover
+### Task 4: Board overlays — current-move highlight (①), score-event spotlight (④), meeple hover ✅ DONE (c3df249 + empty-anchor guard ab2ecbb; shared overlays.js)
 **Depends on:** Task 2
 
 On the replay board canvas, per current step:
