@@ -527,6 +527,9 @@ function markPlacedMeeple(view, mv, color) {
   if (!a || a.type !== "meeple") return;
   const tile = view.tiles.find((t) => t.x === mv.x && t.y === mv.y);
   if (!tile) return;
+  // If the move completed the feature the same turn, the meeple is already back
+  // in supply on this board — don't ring an empty spot.
+  if (!tile.meeples.some((m) => m.feature === a.feature)) return;
   const def = R.tiledefs[tile.type];
   const anchor = featureAnchor(def, a.feature, tile.rot);
   const c = cellPx(R.cam);
