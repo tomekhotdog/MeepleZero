@@ -174,7 +174,7 @@ function buildMoveList() {
 
     const num = document.createElement("span");
     num.className = "move-n";
-    num.textContent = String(rec.n);
+    num.textContent = String(rec.n + 1); // 1-based, matching the scrubber's "move N / M"
 
     const tile = document.createElement("span");
     tile.className = "move-tile";

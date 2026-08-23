@@ -76,7 +76,7 @@ win-prob + search panel still work (scrub through, no console errors), no
 horizontal page scroll at 1024px. Screenshot + inspect.
 **Commit:** `refactor(web): replay view as 3-column analysis workbench`.
 
-### Task 3: Move-list rail (⑨)
+### Task 3: Move-list rail (⑨) ✅ DONE (211ffe4 + 1-based move number)
 **Depends on:** Task 2
 
 Populate `#move-list` in the left rail: one row per move — `n · player swatch ·
