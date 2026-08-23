@@ -124,7 +124,7 @@ existing annotated replay. Toggle on → ghosts appear at candidate cells; toggl
 off → gone; on a human/greedy replay → disabled/no-data state. Screenshot.
 **Commit:** `feat(web): replay alternative-move ghosts (prior vs visits on the board)`.
 
-### Task 6: Enriched search-read panel (⑧)
+### Task 6: Enriched search-read panel (⑧) ✅ DONE (66f457f)
 **Depends on:** Task 2
 
 Extend the existing prior-vs-visits panel in `#this-move`: show `annot.value` as
