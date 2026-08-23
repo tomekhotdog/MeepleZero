@@ -66,8 +66,19 @@
             <div id="search-note" class="muted"></div>
           </div>
 
-          <!-- Placeholder: future alternatives toggle. -->
-          <div id="alt-toggle-slot"></div>
+          <!-- (②) Alternative-move ghosts: overlay the placements MCTS weighed. -->
+          <div id="alt-toggle-slot">
+            <div class="panel" id="alt-panel" hidden>
+              <div id="alt-row">
+                <span class="label" id="alt-label">Show alternatives</span>
+                <span class="switch">
+                  <input type="checkbox" id="alt-toggle" aria-labelledby="alt-label" />
+                  <span class="track"></span>
+                </span>
+              </div>
+              <div id="alt-note" class="muted"></div>
+            </div>
+          </div>
         </section>
 
         <section id="this-game">

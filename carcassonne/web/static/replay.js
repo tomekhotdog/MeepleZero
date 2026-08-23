@@ -16,7 +16,7 @@ import {
   screenToCellFloat,
   worldToScreen,
 } from "./board.js";
-import { TOKENS, featureAnchor } from "./tiles.js";
+import { TOKENS, featureAnchor, drawTile } from "./tiles.js";
 import {
   drawMoveRing,
   drawTileHighlight,
@@ -44,6 +44,9 @@ const R = {
   timer: null,
   meepleHits: [], // per-frame [{cx, cy, r, meeple}] for meeple hover hit-testing
   hoverMeeple: null, // the meeple dict under the cursor, or null
+  showAlts: false, // (②) "Show alternatives" toggle; persists across scrubbing
+  ghostHits: [], // per-frame [{left, top, size, cand, priorPct, state}] for ghost hover
+  hoverGhost: null, // the ghost hit under the cursor, or null
 };
 
 // --- DOM ---------------------------------------------------------------------
@@ -58,6 +61,12 @@ const stage = $("stage");
 // #meeple-tip CSS is global so it matches. replay.html is a separate page, so
 // we build the element here.
 const meepleTip = createMeepleTip(stage);
+// (②) A second tooltip for hovered alternative-move ghosts, styled with the
+// --ai accent (#ghost-tip in style.css). Lives in the stage like the meeple tip.
+const ghostTip = document.createElement("div");
+ghostTip.id = "ghost-tip";
+ghostTip.setAttribute("role", "tooltip");
+stage.append(ghostTip);
 
 const playerColor = (p) => (p === 0 ? TOKENS.p0 : TOKENS.p1);
 
@@ -145,8 +154,10 @@ function setIndex(i) {
   // no move has been played yet (start position).
   $("position").textContent = R.index === 0 ? `start / ${M}` : `move ${R.index} / ${M}`;
   clearMeepleHover(); // a moved board makes any hovered feature stale
+  clearGhostHover(); // and any hovered ghost from the previous position
   renderMoveInfo();
   renderSearchPanel();
+  renderAltPanel();
   updateMoveHighlight();
 }
 
@@ -383,6 +394,155 @@ function barRow(tag, cls, frac) {
   return row;
 }
 
+// --- (②) alternative-move ghosts ---------------------------------------------
+
+// Classify the current move's search annot for the ghosts overlay:
+//   "none"      — no annot (human move): nothing to show, toggle disabled.
+//   "heuristic" — priors present but zero visits (greedy): size ghosts by prior.
+//   "mcts"      — real tree search (visits > 0): size ghosts by visits.
+// Also returns the totals used to normalise, and a one-line explanatory note.
+function altInfo(rec) {
+  const annot = rec ? rec.annot : null;
+  if (!annot || annot.top.length === 0) {
+    return { state: "none", note: "No search data for this move.", totalVisits: 0, totalPrior: 1 };
+  }
+  const totalVisits = annot.top.reduce((s, c) => s + c.visits, 0);
+  const totalPrior = annot.top.reduce((s, c) => s + c.prior, 0) || 1;
+  if (totalVisits === 0) {
+    return { state: "heuristic", note: "Heuristic priors (no search).", totalVisits, totalPrior };
+  }
+  return { state: "mcts", note: "Ghost opacity ∝ search visits.", totalVisits, totalPrior };
+}
+
+// Toggle panel: shown for any current move, disabled when there is no search
+// data. The checkbox reflects the persistent R.showAlts so scrubbing keeps it.
+function renderAltPanel() {
+  const panel = $("alt-panel");
+  const toggle = $("alt-toggle");
+  const note = $("alt-note");
+  // The current move is the just-played one: moves[R.index - 1].
+  const c = R.index - 1;
+  if (c < 0) {
+    panel.hidden = true;
+    return;
+  }
+  panel.hidden = false;
+  toggle.checked = R.showAlts;
+  const info = altInfo(moves()[c]);
+  toggle.disabled = info.state === "none";
+  // Explain the state: always for "none"/"heuristic"; for real search only once
+  // the ghosts are actually on (otherwise the note describes nothing visible).
+  note.textContent = info.state === "mcts" && !R.showAlts ? "" : info.note;
+}
+
+// Draw a translucent ghost of the drawn tile at each candidate placement the AI
+// weighed for this move, opacity ∝ its share of visits (or prior, for greedy).
+// The move actually played is left to drawMoveRing (solid + ringed), so it is
+// skipped here. Records screen boxes in R.ghostHits for hover hit-testing.
+function drawGhosts() {
+  R.ghostHits = [];
+  if (!R.showAlts) return;
+  const c = R.index - 1;
+  if (c < 0) return;
+  const rec = moves()[c];
+  const info = altInfo(rec);
+  if (info.state === "none") return;
+  const def = R.tiledefs[rec.tile];
+  if (!def) return;
+  const cell = cellPx(R.cam);
+  for (const cand of rec.annot.top) {
+    if (sameMove(cand.move, rec.move)) continue; // the played move stays solid + ringed
+    const frac =
+      info.state === "mcts" ? cand.visits / info.totalVisits : cand.prior / info.totalPrior;
+    const alpha = Math.max(0.15, Math.min(0.85, frac));
+    const { sx, sy } = worldToScreen(board, R.cam, cand.move.x, cand.move.y);
+    const left = sx - cell / 2;
+    const top = sy - cell / 2;
+    const meeples = [];
+    const a = cand.move.action;
+    if (a && a.type === "meeple") {
+      meeples.push({ player: rec.player, kind: a.kind, feature: a.feature });
+    }
+    bctx.save();
+    bctx.translate(left, top);
+    drawTile(bctx, def, cand.move.rot, cell, { alpha, meeples });
+    bctx.restore();
+    // A thin dashed --ai frame marks it as a hypothetical AI-weighed placement.
+    bctx.save();
+    bctx.globalAlpha = Math.max(0.4, alpha);
+    bctx.strokeStyle = TOKENS.ai;
+    bctx.setLineDash([4, 3]);
+    bctx.lineWidth = 1.5;
+    bctx.strokeRect(left + 1.5, top + 1.5, cell - 3, cell - 3);
+    bctx.restore();
+    R.ghostHits.push({
+      left,
+      top,
+      size: cell,
+      cand,
+      priorPct: cand.prior / info.totalPrior,
+      state: info.state,
+    });
+  }
+}
+
+// Ghost under (px, py), canvas-relative, or null. Later-drawn ghosts sit on top,
+// so hit-test back to front.
+function hitTestGhost(px, py) {
+  for (let i = R.ghostHits.length - 1; i >= 0; i--) {
+    const g = R.ghostHits[i];
+    if (px >= g.left && px <= g.left + g.size && py >= g.top && py <= g.top + g.size) return g;
+  }
+  return null;
+}
+
+function updateGhostHover(px, py) {
+  const hit = hitTestGhost(px, py);
+  if (!hit) {
+    clearGhostHover();
+    return false;
+  }
+  clearMeepleHover(); // never stack the two tooltips
+  R.hoverGhost = hit;
+  showGhostTip(hit, px, py);
+  return true;
+}
+
+function clearGhostHover() {
+  R.hoverGhost = null;
+  ghostTip.classList.remove("show");
+}
+
+// A small tag near the ghost: prior % (normalised to match the search panel),
+// visit count, and the meeple action it would take.
+function showGhostTip(g, px, py) {
+  const mv = g.cand.move;
+  const a = mv.action;
+  const act = a === null ? "no meeple" : a.type === "meeple" ? `${a.kind} f${a.feature}` : "retrieve abbot";
+  const head = document.createElement("div");
+  head.className = "tip-kind";
+  head.textContent = g.state === "mcts" ? "alternative" : "alternative · prior only";
+  const prior = document.createElement("div");
+  prior.textContent = `prior ${Math.round(g.priorPct * 100)}%`;
+  const visits = document.createElement("div");
+  visits.textContent = `visits ${g.cand.visits}`;
+  const action = document.createElement("div");
+  action.textContent = act;
+  ghostTip.replaceChildren(head, prior, visits, action);
+  ghostTip.classList.add("show");
+  // Offset from the cursor, clamped inside the stage so nothing gets clipped.
+  const sw = stage.clientWidth;
+  const sh = stage.clientHeight;
+  const tw = ghostTip.offsetWidth;
+  const th = ghostTip.offsetHeight;
+  let left = px + 16;
+  let top = py + 16;
+  if (left + tw > sw) left = px - tw - 16;
+  if (top + th > sh) top = py - th - 16;
+  ghostTip.style.left = `${Math.max(4, left)}px`;
+  ghostTip.style.top = `${Math.max(4, top)}px`;
+}
+
 // --- win-probability chart ---------------------------------------------------
 
 // value is from the MOVING player's perspective in [-1, 1]; convert to a
@@ -503,6 +663,10 @@ function render() {
     // Record meeple discs so pointermove can hit-test them.
     R.meepleHits = collectMeepleHits(view, R.tiledefs, board, R.cam);
 
+    // (②) Alternative-move ghosts: the placements MCTS weighed for this move,
+    // over the (empty) candidate cells. Under the score highlights / move ring.
+    drawGhosts();
+
     // (④) Score-event spotlight: highlight the tiles that scored to reach this
     // board, in the scoring player's colour.
     const events = view.last_events ?? [];
@@ -605,6 +769,7 @@ board.addEventListener("pointermove", (e) => {
   const rect = board.getBoundingClientRect();
   if (R.drag) {
     clearMeepleHover();
+    clearGhostHover();
     const c = cellPx(R.cam);
     R.cam.x -= (e.clientX - R.drag.px) / c;
     R.cam.y += (e.clientY - R.drag.py) / c; // screen y down = world south
@@ -612,10 +777,18 @@ board.addEventListener("pointermove", (e) => {
     R.drag.py = e.clientY;
     return;
   }
-  updateMeepleHover(e.clientX - rect.left, e.clientY - rect.top);
+  const px = e.clientX - rect.left;
+  const py = e.clientY - rect.top;
+  // Ghost tags take precedence over meeple tips (ghosts sit on empty cells, so
+  // the two rarely collide, but never show both at once).
+  if (updateGhostHover(px, py)) return;
+  updateMeepleHover(px, py);
 });
 
-board.addEventListener("pointerleave", clearMeepleHover);
+board.addEventListener("pointerleave", () => {
+  clearMeepleHover();
+  clearGhostHover();
+});
 
 // Find the meeple under the cursor (if any) and drive the hover tooltip.
 function updateMeepleHover(px, py) {
@@ -671,6 +844,11 @@ $("slider").addEventListener("input", (e) => {
   setIndex(Number(e.target.value));
 });
 winCanvas.addEventListener("click", winProbClick);
+$("alt-toggle").addEventListener("change", (e) => {
+  R.showAlts = e.target.checked;
+  clearGhostHover();
+  renderAltPanel(); // refresh the note now the toggle changed
+});
 
 document.addEventListener("keydown", (e) => {
   if (e.target.matches("input, select, textarea")) return;
@@ -704,7 +882,7 @@ function showError(msg) {
 }
 
 function hidePanels() {
-  for (const id of ["scrubber", "move-info", "search-panel", "winprob-panel"]) {
+  for (const id of ["scrubber", "move-info", "search-panel", "alt-panel", "winprob-panel"]) {
     $(id).hidden = true;
   }
   $("move-list").replaceChildren();

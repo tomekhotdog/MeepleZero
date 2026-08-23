@@ -841,6 +841,31 @@ dialog .actions {
   margin-top: 6px;
 }
 
+/* (②) Alternative-move ghosts toggle — mirrors the play view's hint switch.
+   This is AI-search data, so the --ai accent is appropriate here. */
+#alt-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+#alt-row .label {
+  font-size: 13px;
+}
+.switch input:disabled {
+  cursor: not-allowed;
+}
+.switch input:disabled + .track {
+  opacity: 0.4;
+}
+#alt-note {
+  font-size: 11px;
+  margin-top: 6px;
+}
+#alt-note:empty {
+  display: none;
+}
+
 /* Win-probability chart. */
 #winprob {
   display: block;
@@ -1010,6 +1035,31 @@ dialog .actions {
 #meeple-tip .tip-kind {
   color: var(--bone);
   text-transform: capitalize;
+  margin-bottom: 2px;
+}
+
+/* (②) Ghost hover tag — same chrome as the meeple tip, --ai accent since it
+   surfaces AI-search data (prior % + visit count for a considered placement). */
+#ghost-tip {
+  position: absolute;
+  z-index: 5;
+  display: none;
+  pointer-events: none;
+  max-width: 180px;
+  padding: 7px 9px;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--bone-dim);
+  background: var(--stage-raised);
+  border: 1px solid var(--ai);
+  border-radius: 5px;
+}
+#ghost-tip.show {
+  display: block;
+}
+#ghost-tip .tip-kind {
+  color: var(--ai);
   margin-bottom: 2px;
 }
 
