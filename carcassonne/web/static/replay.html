@@ -37,7 +37,13 @@
             <span id="position" class="mono">move 0 / 0</span>
             <button id="play" type="button" aria-label="Play / pause" title="Play / pause (space)">▶</button>
           </div>
-          <input id="slider" type="range" min="0" max="0" value="0" step="1" aria-label="Move" />
+          <!-- (⑩) The slider track with a key-moment markers layer overlaid: ticks
+               marking lead changes, big score swings, and the first meeple, built
+               once per replay so a long game is navigable. -->
+          <div class="slider-wrap">
+            <input id="slider" type="range" min="0" max="0" value="0" step="1" aria-label="Move" />
+            <div id="scrub-markers" role="group" aria-label="Key moments"></div>
+          </div>
           <div class="scrub-buttons">
             <button id="first" type="button" title="First (Home)">⏮</button>
             <button id="prev" type="button" title="Previous (←)">◀</button>

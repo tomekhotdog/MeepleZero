@@ -724,10 +724,75 @@ dialog .actions {
   font-size: 13px;
 }
 
+/* (⑩) The slider sits in a relative wrapper so the key-moment markers layer can
+   overlay its track without disturbing the native range control. */
+.slider-wrap {
+  position: relative;
+}
+
 #slider {
+  display: block;
   width: 100%;
   accent-color: var(--ai);
   cursor: pointer;
+}
+
+/* (⑩) Key-moment markers: small clickable ticks along the slider track. The
+   layer itself is click-through; only the ticks capture the pointer. Ticks sit
+   just under the track so they don't fight the thumb for clicks. */
+#scrub-markers {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -2px;
+  height: 8px;
+  pointer-events: none;
+}
+
+.scrub-marker {
+  position: absolute;
+  bottom: 0;
+  transform: translateX(-50%);
+  width: 3px;
+  height: 8px;
+  padding: 0;
+  border: none;
+  border-radius: 1px;
+  background: var(--bone-dim);
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+/* Generous invisible hit area around the 3px tick for easy clicking/tapping. */
+.scrub-marker::before {
+  content: "";
+  position: absolute;
+  inset: -6px -5px;
+}
+
+.scrub-marker:hover,
+.scrub-marker.current {
+  background: var(--bone);
+}
+
+.scrub-marker:focus-visible {
+  outline: 2px solid var(--bone);
+  outline-offset: 1px;
+}
+
+/* Subtle per-kind tinting; a meeple tick leans on a player-neutral bone, a
+   swing on the warm city gold, a lead change on the --ai accent. A tick with
+   several kinds keeps whichever colour the last rule sets — fine for a hint. */
+.scrub-marker.m-swing {
+  background: var(--city);
+}
+.scrub-marker.m-lead {
+  background: var(--ai);
+}
+.scrub-marker.m-swing:hover,
+.scrub-marker.m-lead:hover,
+.scrub-marker.current {
+  background: var(--bone);
 }
 
 .scrub-buttons {

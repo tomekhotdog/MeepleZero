@@ -51,6 +51,8 @@ const R = {
   hoverGhost: null, // the ghost hit under the cursor, or null
   deckCells: null, // (⑤) {type: {cell, cnt}} built once per replay; updated on scrub
   deckTotal: 0, // (⑤) total tiles in the deck (Σ counts), for the "N / total" header
+  keyMoments: [], // (⑩) [{pos, kinds:[...], label}] key positions on the scrubber
+  keyTicks: null, // (⑩) Map<pos, tickButton>, for emphasising the current tick
 };
 
 // --- DOM ---------------------------------------------------------------------
@@ -133,12 +135,14 @@ async function loadReplay(name) {
   R.cam = { x: 0, y: 0, zoom: 1 };
   buildWinProb();
   buildScore();
+  buildKeyMoments();
   buildMoveList();
   buildDeck();
   const M = R.data.moves.length;
   const slider = $("slider");
   slider.max = String(M);
   slider.value = "0";
+  renderKeyMoments();
   $("empty-hint").style.display = "none";
   $("scrubber").hidden = false;
   $("winprob-panel").hidden = false;
@@ -173,6 +177,7 @@ function setIndex(i) {
   renderDeck();
   renderSupply();
   updateMoveHighlight();
+  updateKeyMomentCurrent();
 }
 
 function step(delta) {
@@ -802,6 +807,121 @@ function scoreClick(e) {
   setIndex(i);
 }
 
+// --- (⑩) key-moment markers --------------------------------------------------
+
+// A move's own score swing is a "big" moment at this many points or more.
+const SWING_THRESHOLD = 6;
+
+// Human-readable label per moment kind, in the order we present them.
+const MOMENT_LABEL = {
+  lead: "Lead change",
+  swing: "Big score swing",
+  meeple: "First meeple",
+};
+
+// Scan the (already-built) win-prob + score series for the positions worth
+// jumping to, so a long game is navigable. A position here is an R.index value
+// (1..M): the just-played move that caused the moment. Built once per replay —
+// the moments don't change on scrub. Kinds detected:
+//   lead   — R.winprob crosses 0.5 between consecutive KNOWN values.
+//   swing  — the mover's running-score delta across the move is ≥ threshold.
+//   meeple — the first move whose action places a meeple.
+// A move can be several kinds at once, so positions are merged into one tick
+// whose labels are combined.
+function buildKeyMoments() {
+  const moves = R.data.moves;
+  const M = moves.length;
+  // pos -> {kinds:Set<string>, swing:number} accumulator, later flattened + sorted.
+  const byPos = new Map();
+  const mark = (pos, kind) => {
+    let e = byPos.get(pos);
+    if (!e) byPos.set(pos, (e = { kinds: new Set(), swing: 0 }));
+    e.kinds.add(kind);
+    return e;
+  };
+
+  // Lead changes: walk the known win-prob points; a moment is where the P0
+  // advantage flips side of 0.5 vs the previous known point. winprob[i] is
+  // move i (0-based) → position i+1.
+  let prevSide = null; // true = P0 ahead (p ≥ 0.5)
+  for (let i = 0; i < R.winprob.length; i++) {
+    if (!R.winprob[i].known) continue;
+    const side = R.winprob[i].p >= 0.5;
+    if (prevSide !== null && side !== prevSide) mark(i + 1, "lead");
+    prevSide = side;
+  }
+
+  // Big score swings: the mover's running-score gain across their move. Uses the
+  // states' running .scores (not the terminal .final_scores) so a swing reflects
+  // the move's own scoring, not the end-game bonus lumped onto the last position.
+  for (let i = 0; i < M; i++) {
+    const player = moves[i].player;
+    const delta = R.data.states[i + 1].scores[player] - R.data.states[i].scores[player];
+    if (delta >= SWING_THRESHOLD) mark(i + 1, "swing").swing = delta;
+  }
+
+  // First meeple placement: the first move whose action is a meeple placement.
+  for (let i = 0; i < M; i++) {
+    const a = moves[i].move.action;
+    if (a && a.type === "meeple") {
+      mark(i + 1, "meeple");
+      break;
+    }
+  }
+
+  R.keyMoments = [...byPos.entries()]
+    .map(([pos, e]) => ({ pos, kinds: e.kinds, label: momentLabel(e) }))
+    .sort((a, b) => a.pos - b.pos);
+}
+
+// Combine one position's kinds into a single tooltip string, e.g.
+// "Lead change · Big score swing (+8)".
+function momentLabel(e) {
+  return ["lead", "swing", "meeple"]
+    .filter((k) => e.kinds.has(k))
+    .map((k) => (k === "swing" && e.swing ? `${MOMENT_LABEL.swing} (+${e.swing})` : MOMENT_LABEL[k]))
+    .join(" · ");
+}
+
+// Half the native range thumb, in px: markers are positioned along the usable
+// track (between thumb centres at the two ends), so a tick sits under the thumb
+// when the slider is at that position. Approximate — good enough visually.
+const THUMB_PX = 14;
+
+// Render the ticks into the markers layer overlaying the slider track. Each tick
+// is a focusable button (keyboard + hover), coloured by its kinds, that jumps to
+// its position on click. Built once per replay by loadReplay.
+function renderKeyMoments() {
+  const layer = $("scrub-markers");
+  layer.replaceChildren();
+  R.keyTicks = new Map();
+  const M = moves().length;
+  if (!R.data || M === 0) return;
+  for (const km of R.keyMoments) {
+    const frac = km.pos / M;
+    const tick = document.createElement("button");
+    tick.type = "button";
+    tick.className = "scrub-marker";
+    for (const k of km.kinds) tick.classList.add(`m-${k}`);
+    tick.style.left = `calc(${frac} * (100% - ${THUMB_PX}px) + ${THUMB_PX / 2}px)`;
+    tick.setAttribute("aria-label", `Move ${km.pos}: ${km.label}`);
+    tick.title = km.label;
+    tick.addEventListener("click", () => {
+      stopAutoplay();
+      setIndex(km.pos);
+    });
+    layer.append(tick);
+    R.keyTicks.set(km.pos, tick);
+  }
+  updateKeyMomentCurrent();
+}
+
+// Emphasise the tick (if any) at the current position; called on every scrub.
+function updateKeyMomentCurrent() {
+  if (!R.keyTicks) return;
+  for (const [pos, tick] of R.keyTicks) tick.classList.toggle("current", pos === R.index);
+}
+
 // --- (⑤) deck tracker --------------------------------------------------------
 
 // Build the per-type grid once per replay: one cell per tile type (sorted by id),
@@ -1117,7 +1237,8 @@ document.addEventListener("keydown", (e) => {
     stopAutoplay();
     setIndex(moves().length);
   } else if (e.key === " ") {
-    if (e.target.closest(".move-row")) return; // let a focused move row self-activate
+    // Let a focused move row or key-moment tick self-activate on Space.
+    if (e.target.closest(".move-row, .scrub-marker")) return;
     e.preventDefault();
     toggleAutoplay();
   } else {
@@ -1138,6 +1259,8 @@ function hidePanels() {
   }
   $("move-list").replaceChildren();
   R.moveRows = null;
+  $("scrub-markers").replaceChildren();
+  R.keyTicks = null;
   $("deck-grid").replaceChildren();
   R.deckCells = null;
   $("supply-rows").replaceChildren();
