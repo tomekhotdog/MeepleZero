@@ -222,9 +222,15 @@ def _meeple_legal(
 
 
 def _score_value(d: FeatureData) -> int:
+    """City/road value when the feature completes: cities double, roads flat."""
     if d.kind is FeatureKind.CITY:
         return 2 * len(d.tiles) + 2 * d.shields
     return len(d.tiles)  # road
+
+
+def _endgame_value(d: FeatureData) -> int:
+    """City/road value if the game ended now (incomplete): 1/tile, +1/shield for cities."""
+    return len(d.tiles) + (d.shields if d.kind is FeatureKind.CITY else 0)
 
 
 def neighbours8(pos: Pos) -> tuple[Pos, ...]:

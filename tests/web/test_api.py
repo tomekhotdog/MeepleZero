@@ -261,9 +261,21 @@ def test_meeple_appears_in_state_view(client: TestClient) -> None:
     chosen = legal[idx]
     state = client.post(f"/api/games/{game_id}/move", json={"idx": idx}).json()["state"]
     placed = next(t for t in state["tiles"] if t["x"] == chosen["x"] and t["y"] == chosen["y"])
-    assert {"player": 0, "kind": "meeple", "feature": chosen["action"]["feature"]} in placed[
-        "meeples"
-    ]
+    meeple = next(
+        m
+        for m in placed["meeples"]
+        if m["player"] == 0
+        and m["kind"] == "meeple"
+        and m["feature"] == chosen["action"]["feature"]
+    )
+    # the meeple carries its feature's scoring report for hover breakdown
+    assert meeple["score_now"] >= 0
+    assert meeple["score_potential"] >= meeple["score_now"]  # completing never loses points
+    assert isinstance(meeple["complete"], bool)
+    assert meeple["feature_kind"] in {"city", "road", "monastery", "garden"}
+    tiles = meeple["feature_tiles"]
+    assert tiles  # non-empty footprint
+    assert [chosen["x"], chosen["y"]] in tiles  # includes the meeple's own tile
 
 
 def test_session_store_evicts_and_closes_abandoned_writers(tmp_path: Path) -> None:

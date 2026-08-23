@@ -8,7 +8,14 @@ from __future__ import annotations
 
 from typing import Any
 
-from carcassonne.core import GameState, Move, ScoreEvent, final_scores, is_terminal
+from carcassonne.core import (
+    GameState,
+    Move,
+    ScoreEvent,
+    feature_report,
+    final_scores,
+    is_terminal,
+)
 from carcassonne.core.tiles import DECK, derived_edges
 from carcassonne.core.types import Pos
 from carcassonne.game.replay import MoveRecord, ReplayHeader
@@ -26,8 +33,18 @@ def state_view(state: GameState) -> dict[str, Any]:
     for d in state.features.data.values():
         for m in d.meeples:
             pos, feature = m.node
+            report = feature_report(state, m.node)
             meeples_at.setdefault(pos, []).append(
-                {"player": m.player, "kind": m.kind.value, "feature": feature}
+                {
+                    "player": m.player,
+                    "kind": m.kind.value,
+                    "feature": feature,
+                    "feature_tiles": [[p.x, p.y] for p in report.tiles],
+                    "score_now": report.current,
+                    "score_potential": report.potential,
+                    "feature_kind": report.kind.value,
+                    "complete": report.complete,
+                }
             )
     tiles = [
         {

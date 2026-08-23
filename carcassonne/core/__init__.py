@@ -3,7 +3,14 @@ plus endgame_potential for heuristic agents."""
 
 from carcassonne.core.config import GameConfig
 from carcassonne.core.engine import GameState, ScoreEvent, apply, legal_moves
-from carcassonne.core.game import endgame_potential, final_scores, is_terminal, new_game
+from carcassonne.core.game import (
+    FeatureReport,
+    endgame_potential,
+    feature_report,
+    final_scores,
+    is_terminal,
+    new_game,
+)
 from carcassonne.core.types import (
     IllegalMove,
     MeepleKind,
@@ -17,6 +24,7 @@ from carcassonne.core.types import (
 )
 
 __all__ = [
+    "FeatureReport",
     "GameConfig",
     "GameState",
     "IllegalMove",
@@ -31,6 +39,7 @@ __all__ = [
     "ScoreEvent",
     "apply",
     "endgame_potential",
+    "feature_report",
     "final_scores",
     "is_terminal",
     "legal_moves",

@@ -2,10 +2,17 @@ from __future__ import annotations
 
 import random
 from collections.abc import Iterator
+from dataclasses import dataclass
 
 from carcassonne.core.config import GameConfig
-from carcassonne.core.engine import GameState, draw_playable, neighbours8
-from carcassonne.core.features import FeatureIndex
+from carcassonne.core.engine import (
+    GameState,
+    _endgame_value,
+    _score_value,
+    draw_playable,
+    neighbours8,
+)
+from carcassonne.core.features import FeatureIndex, NodeId
 from carcassonne.core.state import empty_board_with_start
 from carcassonne.core.tiles import DECK, START_TILE_ID
 from carcassonne.core.types import FeatureKind, Player, Pos
@@ -75,7 +82,7 @@ def _endgame_awards(state: GameState) -> Iterator[tuple[Player, int]]:
         if d.kind in (FeatureKind.CITY, FeatureKind.ROAD):
             if d.open_edges == 0:
                 continue  # completed features were scored live and cleared
-            points = len(d.tiles) + (d.shields if d.kind is FeatureKind.CITY else 0)
+            points = _endgame_value(d)
             counts: dict[Player, int] = {}
             for m in d.meeples:
                 counts[m.player] = counts.get(m.player, 0) + 1
@@ -86,3 +93,42 @@ def _endgame_awards(state: GameState) -> Iterator[tuple[Player, int]]:
         else:  # monastery / garden: exactly one tile, at most one piece
             (pos,) = d.tiles
             yield d.meeples[0].player, 1 + sum(1 for q in neighbours8(pos) if q in state.board)
+
+
+@dataclass(frozen=True, slots=True)
+class FeatureReport:
+    """A single feature's scoring breakdown, for UI hover/highlight.
+
+    `current` is the value if the game ended right now (end-game valuation);
+    `potential` is the value if the feature completed as-is. They coincide for
+    already-complete features and for roads (which score the same either way).
+    """
+
+    kind: FeatureKind
+    tiles: tuple[Pos, ...]  # sorted footprint, for board highlight
+    current: int
+    potential: int
+    complete: bool
+
+
+def feature_report(state: GameState, node: NodeId) -> FeatureReport:
+    """Scoring report for the feature containing `node` (any node, root or not).
+
+    Mirrors the live/end-game scoring exactly (see engine `_score_value` /
+    `_endgame_value` and `_endgame_awards`); it invents no new numbers.
+    """
+    d = state.features.root_data(node)
+    tiles = tuple(sorted(d.tiles))
+    if d.kind in (FeatureKind.CITY, FeatureKind.ROAD):
+        complete = d.open_edges == 0
+        potential = _score_value(d)
+        current = potential if complete else _endgame_value(d)
+    else:  # monastery / garden: exactly one tile
+        (pos,) = d.tiles
+        occupied = sum(1 for q in neighbours8(pos) if q in state.board)
+        current = 1 + occupied
+        potential = 9
+        complete = occupied == 8
+    return FeatureReport(
+        kind=d.kind, tiles=tiles, current=current, potential=potential, complete=complete
+    )
