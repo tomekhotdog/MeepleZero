@@ -898,6 +898,34 @@ dialog .actions {
   cursor: pointer;
 }
 
+/* (③) Running score readout + score-over-time chart. Player colours here —
+   this is the actual game score, distinct from the AI's win-prob belief. */
+#score-readout {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 8px;
+  font-family: var(--serif);
+  font-size: 34px;
+  line-height: 1.1;
+  margin-bottom: 8px;
+}
+#score-p0 {
+  color: var(--p0);
+}
+#score-p1 {
+  color: var(--p1);
+}
+.score-sep {
+  color: var(--bone-dim);
+}
+#score-chart {
+  display: block;
+  width: 100%;
+  height: 110px;
+  cursor: pointer;
+}
+
 /* --- training view --------------------------------------------------------- */
 
 .training-stage {

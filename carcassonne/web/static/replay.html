@@ -90,8 +90,20 @@
             <div id="winprob-axis" class="mono muted"></div>
           </div>
 
+          <!-- (③) Running score + score-over-time chart. Player colours (not
+               --ai): this is the actual game score, not AI analysis. -->
+          <div class="panel" id="score-panel" hidden>
+            <div class="panel-title">Score</div>
+            <div id="score-readout">
+              <span id="score-p0" class="score-num">0</span>
+              <span class="score-sep">:</span>
+              <span id="score-p1" class="score-num">0</span>
+            </div>
+            <canvas id="score-chart" aria-label="Score across the game"></canvas>
+            <div id="score-axis" class="mono muted"></div>
+          </div>
+
           <!-- Placeholders: future whole-game panels. -->
-          <div id="score-panel" hidden></div>
           <div id="deck-panel" hidden></div>
           <div id="supply-panel" hidden></div>
         </section>

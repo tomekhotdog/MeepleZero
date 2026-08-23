@@ -38,6 +38,8 @@ const R = {
   index: 0, // current position: 0..moves.length
   moveRows: null, // <button> per move, built once per replay; index-aligned to moves
   winprob: [], // per-move {p: prob for player 0, known: bool}, length moves.length
+  scores: [], // (③) per-position [p0, p1] running score, length states.length (M+1)
+  scoreMax: 1, // (③) y-axis top for the score chart (max score reached, min 1)
   cam: { x: 0, y: 0, zoom: 1 },
   drag: null,
   playing: false,
@@ -55,6 +57,7 @@ const $ = (id) => document.getElementById(id);
 const board = $("board");
 const bctx = board.getContext("2d");
 const winCanvas = $("winprob");
+const scoreCanvas = $("score-chart");
 const select = $("replay-select");
 const stage = $("stage");
 // The meeple-hover tooltip lives in the stage (same as the play view); the
@@ -127,6 +130,7 @@ async function loadReplay(name) {
   }
   R.cam = { x: 0, y: 0, zoom: 1 };
   buildWinProb();
+  buildScore();
   buildMoveList();
   const M = R.data.moves.length;
   const slider = $("slider");
@@ -136,6 +140,8 @@ async function loadReplay(name) {
   $("scrubber").hidden = false;
   $("winprob-panel").hidden = false;
   $("winprob-axis").textContent = `move 0 → ${M} · higher = blue (P0) ahead`;
+  $("score-panel").hidden = false;
+  $("score-axis").textContent = `move 0 → ${M} · points · blue P0 · red P1`;
   document.querySelector(".p0-name").textContent = `P0 ${R.data.header.agents[0]}`;
   setIndex(0);
 }
@@ -158,6 +164,7 @@ function setIndex(i) {
   renderMoveInfo();
   renderSearchPanel();
   renderAltPanel();
+  renderScoreReadout();
   updateMoveHighlight();
 }
 
@@ -691,6 +698,103 @@ function winProbClick(e) {
   setIndex(i + 1);
 }
 
+// --- (③) running score + score-over-time chart -------------------------------
+
+// The actual game score after each position, distinct from the win-prob chart
+// (which is the AI's belief). states[i].scores is [p0, p1] AFTER move i-1, so
+// this series is index-aligned to R.index directly — no -1 offset. The terminal
+// state's running .scores is pre-end-game; its .final_scores adds the end-game
+// scoring of incomplete features, so use that for the last point (and readout)
+// to reflect the true game result.
+function buildScore() {
+  const states = R.data.states;
+  R.scores = states.map((s) => (s.terminal && s.final_scores ? s.final_scores : s.scores));
+  let max = 1;
+  for (const [a, b] of R.scores) max = Math.max(max, a, b);
+  R.scoreMax = max;
+}
+
+// Prominent P0 : P1 readout at the current step, states[R.index].scores.
+function renderScoreReadout() {
+  const s = R.data ? R.scores[R.index] : null;
+  $("score-p0").textContent = s ? String(s[0]) : "0";
+  $("score-p1").textContent = s ? String(s[1]) : "0";
+}
+
+// Mirror of drawWinProb: two lines (P0 blue, P1 red) of running points vs
+// position i (0..M), a mono axis, and a vertical marker at the current step.
+function drawScore() {
+  if (!R.data) return;
+  const ctx = scoreCanvas.getContext("2d");
+  const { w, h } = resizeToDisplay(scoreCanvas, ctx);
+  ctx.clearRect(0, 0, w, h);
+  const padL = 22;
+  const padR = 6;
+  const padT = 8;
+  const padB = 4;
+  const plotW = w - padL - padR;
+  const plotH = h - padT - padB;
+  const n = R.scores.length;
+  const top = R.scoreMax;
+  const xAt = (i) => padL + (n <= 1 ? plotW / 2 : (i / (n - 1)) * plotW);
+  const yAt = (v) => padT + (1 - v / top) * plotH;
+
+  // y labels: 0 at the bottom, the max score at the top.
+  ctx.fillStyle = "rgba(155, 163, 173, 0.8)";
+  ctx.font = "9px ui-monospace, monospace";
+  ctx.textAlign = "right";
+  ctx.textBaseline = "middle";
+  ctx.fillText(String(top), padL - 4, yAt(top));
+  ctx.fillText("0", padL - 4, yAt(0));
+
+  // Baseline (0 points).
+  ctx.strokeStyle = "rgba(155, 163, 173, 0.25)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(padL, yAt(0));
+  ctx.lineTo(padL + plotW, yAt(0));
+  ctx.stroke();
+
+  // Two lines: P0 (blue), P1 (red).
+  for (const p of [0, 1]) {
+    ctx.strokeStyle = playerColor(p);
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    for (let i = 0; i < n; i++) {
+      const x = xAt(i);
+      const y = yAt(R.scores[i][p]);
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+
+  // Current-step marker: index-aligned, so mark R.index directly.
+  if (n > 0) {
+    const mx = xAt(Math.min(R.index, n - 1));
+    ctx.strokeStyle = "rgba(232, 226, 212, 0.7)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(mx, padT);
+    ctx.lineTo(mx, padT + plotH);
+    ctx.stroke();
+  }
+}
+
+// Click-to-jump: data point i is position i, so jump straight there.
+function scoreClick(e) {
+  const n = R.scores.length;
+  if (n === 0) return;
+  const rect = scoreCanvas.getBoundingClientRect();
+  const padL = 22;
+  const padR = 6;
+  const plotW = rect.width - padL - padR;
+  const frac = (e.clientX - rect.left - padL) / plotW;
+  const i = Math.max(0, Math.min(n - 1, Math.round(frac * (n - 1))));
+  stopAutoplay();
+  setIndex(i);
+}
+
 // --- board rendering ---------------------------------------------------------
 
 // The board at R.index is states[R.index] — the position BEFORE move R.index,
@@ -740,6 +844,7 @@ function render() {
     }
 
     drawWinProb();
+    drawScore();
   }
   requestAnimationFrame(render);
 }
@@ -890,6 +995,7 @@ $("slider").addEventListener("input", (e) => {
   setIndex(Number(e.target.value));
 });
 winCanvas.addEventListener("click", winProbClick);
+scoreCanvas.addEventListener("click", scoreClick);
 $("alt-toggle").addEventListener("change", (e) => {
   R.showAlts = e.target.checked;
   clearGhostHover();
@@ -928,7 +1034,7 @@ function showError(msg) {
 }
 
 function hidePanels() {
-  for (const id of ["scrubber", "move-info", "search-panel", "alt-panel", "winprob-panel"]) {
+  for (const id of ["scrubber", "move-info", "search-panel", "alt-panel", "winprob-panel", "score-panel"]) {
     $(id).hidden = true;
   }
   $("move-list").replaceChildren();
