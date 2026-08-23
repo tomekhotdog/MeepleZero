@@ -136,7 +136,7 @@ the existing bars. Null-annot moves show the existing "no search data".
 agreed/overruled flag matches a hand-check on one move. Screenshot.
 **Commit:** `feat(web): enriched replay search-read (value %, delta, agree/overrule)`.
 
-### Task 7: Play tab tile counter (⑥)
+### Task 7: Play tab tile counter (⑥) ✅ DONE (dfd5c70)
 **Depends on:** none (Play view files only — parallel with all replay work)
 
 Add a compact "tiles played X · remaining Y" line to the Play sidebar
