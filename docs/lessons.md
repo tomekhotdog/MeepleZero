@@ -44,3 +44,15 @@
   uncommitted work here; prefer per-file operations. Outcome: nothing permanently
   lost — HEAD ended correct, 174 tests green. The venv/`.pth` iCloud issue above
   is real and independent.
+
+- [rule] 2026-08-23 — **Document-style pages under the app shell need their own
+  scroll container.** The web shell sets `html, body { height: 100%; overflow:
+  hidden }` on purpose — Play/Replay/Training are fixed-viewport layouts whose
+  inner panels scroll (board fills the viewport; replay columns and the training
+  charts column each have `overflow-y: auto`). A new *long-document* page (the
+  Tiles reference tab) added under `#app` was therefore clipped below the fold
+  with no way to scroll. Fix: give the page element its own `overflow-y: auto`
+  (the `.atlas` block; it IS `#app`, already `flex:1` with `min-height:0`, so it
+  becomes the scroll container). Lesson: when adding a scrolling document page to
+  a `body{overflow:hidden}` app, the page container must opt into its own scroll —
+  the body won't do it for you.

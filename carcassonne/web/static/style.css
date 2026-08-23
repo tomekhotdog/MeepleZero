@@ -1270,7 +1270,9 @@ dialog .actions {
 
 /* --- Tiles reference (atlas) ------------------------------------------------ */
 /* Reserved: does NOT use --ai (AI-analysis surfaces only). */
-.atlas { display: block; max-width: 1100px; margin: 0 auto; padding: 24px 20px 64px; }
+/* The app shell sets body{overflow:hidden}; this page is a long document, so it
+   must be its own scroll container (it IS #app, flex:1 with min-height:0). */
+.atlas { display: block; overflow-y: auto; max-width: 1100px; margin: 0 auto; padding: 24px 20px 64px; }
 .atlas #atlas-head { margin-bottom: 8px; }
 .atlas h1 { font-family: var(--serif); font-size: 28px; margin: 0 0 8px; }
 .atlas .summary { font-family: var(--mono); color: var(--bone); opacity: 0.85; margin-bottom: 16px; }
