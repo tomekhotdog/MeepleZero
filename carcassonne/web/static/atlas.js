@@ -5,7 +5,7 @@
 // Named atlas.js (not tiles.js) deliberately: tiles.js is the shared procedural
 // tile renderer imported below and by app.js/replay.js; this is the page module.
 
-import { drawTile } from "/static/tiles.js";
+import { drawTile } from "./tiles.js";
 
 // Groups are tested in order; first match wins. Order encodes the priority:
 // monastery/garden (abbot targets, holds all gardens) → city+road → city → road.
