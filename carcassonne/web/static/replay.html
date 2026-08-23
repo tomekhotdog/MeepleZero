@@ -112,8 +112,12 @@
             <div id="deck-grid"></div>
           </div>
 
-          <!-- Placeholder: future whole-game panel. -->
-          <div id="supply-panel" hidden></div>
+          <!-- (⑦) Meeple supply: each player's follower supply at the current
+               step. Reuses the Play view's .supply pips so the two read the same. -->
+          <div class="panel" id="supply-panel" hidden>
+            <div class="panel-title">Meeple supply</div>
+            <div id="supply-rows"></div>
+          </div>
         </section>
       </aside>
     </div>

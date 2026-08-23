@@ -303,15 +303,28 @@ body {
   line-height: 1.1;
 }
 
-.score-card .supply {
+/* Shared by the Play score cards and the Replay meeple-supply panel (⑦) so the
+   follower pips read identically in both views. */
+.supply {
   display: flex;
   gap: 3px;
   margin-top: 4px;
   align-items: center;
 }
 
-.score-card .supply canvas {
+.supply canvas {
   display: block;
+}
+
+/* (⑦) Replay meeple-supply panel: one labelled row per player above its pips. */
+#supply-panel .supply-row + .supply-row {
+  margin-top: 8px;
+}
+#supply-panel .supply-who {
+  display: flex;
+  align-items: center;
+  font-size: 12px;
+  color: var(--bone-dim);
 }
 
 /* Tiles played / remaining — a compact info line under the score cards. */

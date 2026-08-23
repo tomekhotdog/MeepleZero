@@ -16,7 +16,7 @@ import {
   screenToCellFloat,
   worldToScreen,
 } from "./board.js";
-import { TOKENS, featureAnchor, drawTile } from "./tiles.js";
+import { TOKENS, featureAnchor, drawTile, drawMeepleGlyph } from "./tiles.js";
 import {
   drawMoveRing,
   drawTileHighlight,
@@ -146,6 +146,7 @@ async function loadReplay(name) {
   $("score-panel").hidden = false;
   $("score-axis").textContent = `move 0 → ${M} · points · blue P0 · red P1`;
   $("deck-panel").hidden = false;
+  $("supply-panel").hidden = false;
   document.querySelector(".p0-name").textContent = `P0 ${R.data.header.agents[0]}`;
   setIndex(0);
 }
@@ -170,6 +171,7 @@ function setIndex(i) {
   renderAltPanel();
   renderScoreReadout();
   renderDeck();
+  renderSupply();
   updateMoveHighlight();
 }
 
@@ -852,6 +854,46 @@ function renderDeck() {
   }
 }
 
+// --- (⑦) meeple supply -------------------------------------------------------
+
+// Per-player follower supply at the current step, mirroring the Play view's
+// score-card pips (see app.js): 7 meeple pips (filled while still in supply)
+// plus an abbot pip. states[R.index].meeples is [p0, p1] plain meeples in supply
+// (0..7); .abbots is [p0, p1] with the abbot in supply. Rebuilt on every scrub;
+// 16 tiny canvases is cheap. `pip` is a faithful port of app.js's pip().
+function renderSupply() {
+  const rows = $("supply-rows");
+  rows.replaceChildren();
+  const view = R.data ? R.data.states[R.index] : null;
+  if (!view) return;
+  for (const p of [0, 1]) {
+    const row = document.createElement("div");
+    row.className = "supply-row";
+    const who = document.createElement("div");
+    who.className = "supply-who";
+    who.append(swatch(p), document.createTextNode(`P${p} ${R.data.header.agents[p]}`));
+    const supply = document.createElement("div");
+    supply.className = "supply";
+    for (let i = 0; i < 7; i++) supply.append(pip(p, "meeple", i < view.meeples[p]));
+    supply.append(pip(p, "abbot", view.abbots[p]));
+    row.append(who, supply);
+    rows.append(row);
+  }
+}
+
+function pip(seat, kind, filled) {
+  const cv = document.createElement("canvas");
+  const size = kind === "abbot" ? 16 : 12;
+  cv.width = size * 2;
+  cv.height = size * 2;
+  cv.style.width = `${size}px`;
+  cv.style.height = `${size}px`;
+  const ctx = cv.getContext("2d");
+  ctx.scale(2, 2);
+  drawMeepleGlyph(ctx, size, seat, kind, filled);
+  return cv;
+}
+
 // --- board rendering ---------------------------------------------------------
 
 // The board at R.index is states[R.index] — the position BEFORE move R.index,
@@ -1091,13 +1133,14 @@ function showError(msg) {
 }
 
 function hidePanels() {
-  for (const id of ["scrubber", "move-info", "search-panel", "alt-panel", "winprob-panel", "score-panel", "deck-panel"]) {
+  for (const id of ["scrubber", "move-info", "search-panel", "alt-panel", "winprob-panel", "score-panel", "deck-panel", "supply-panel"]) {
     $(id).hidden = true;
   }
   $("move-list").replaceChildren();
   R.moveRows = null;
   $("deck-grid").replaceChildren();
   R.deckCells = null;
+  $("supply-rows").replaceChildren();
   $("empty-hint").style.display = "";
 }
 
