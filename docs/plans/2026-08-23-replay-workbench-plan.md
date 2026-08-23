@@ -182,7 +182,7 @@ In `#supply-panel`: each player's meeple pips + abbot glyph at the current step
 scrub. Screenshot.
 **Commit:** `feat(web): replay meeple-supply panel`.
 
-### Task 11: Key-moment scrubber markers (⑩)
+### Task 11: Key-moment scrubber markers (⑩) ✅ DONE (7f6f86e)
 **Depends on:** Task 2, Task 8 (win-prob/score series available)
 
 Add ticks on the scrubber timeline for: win-prob lead changes (annot.value sign
