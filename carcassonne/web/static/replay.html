@@ -103,8 +103,16 @@
             <div id="score-axis" class="mono muted"></div>
           </div>
 
-          <!-- Placeholders: future whole-game panels. -->
-          <div id="deck-panel" hidden></div>
+          <!-- (⑤) Deck tracker: which tile types are played / remain. Game info
+               (player-neutral): no --ai accent. Grid built once per replay,
+               counts + full/current classes updated on scrub. -->
+          <div class="panel" id="deck-panel" hidden>
+            <div class="panel-title">Deck</div>
+            <div id="deck-summary" class="mono muted"></div>
+            <div id="deck-grid"></div>
+          </div>
+
+          <!-- Placeholder: future whole-game panel. -->
           <div id="supply-panel" hidden></div>
         </section>
       </aside>

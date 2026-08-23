@@ -49,6 +49,8 @@ const R = {
   showAlts: false, // (②) "Show alternatives" toggle; persists across scrubbing
   ghostHits: [], // per-frame [{left, top, size, cand, priorPct, state}] for ghost hover
   hoverGhost: null, // the ghost hit under the cursor, or null
+  deckCells: null, // (⑤) {type: {cell, cnt}} built once per replay; updated on scrub
+  deckTotal: 0, // (⑤) total tiles in the deck (Σ counts), for the "N / total" header
 };
 
 // --- DOM ---------------------------------------------------------------------
@@ -132,6 +134,7 @@ async function loadReplay(name) {
   buildWinProb();
   buildScore();
   buildMoveList();
+  buildDeck();
   const M = R.data.moves.length;
   const slider = $("slider");
   slider.max = String(M);
@@ -142,6 +145,7 @@ async function loadReplay(name) {
   $("winprob-axis").textContent = `move 0 → ${M} · higher = blue (P0) ahead`;
   $("score-panel").hidden = false;
   $("score-axis").textContent = `move 0 → ${M} · points · blue P0 · red P1`;
+  $("deck-panel").hidden = false;
   document.querySelector(".p0-name").textContent = `P0 ${R.data.header.agents[0]}`;
   setIndex(0);
 }
@@ -165,6 +169,7 @@ function setIndex(i) {
   renderSearchPanel();
   renderAltPanel();
   renderScoreReadout();
+  renderDeck();
   updateMoveHighlight();
 }
 
@@ -795,6 +800,58 @@ function scoreClick(e) {
   setIndex(i);
 }
 
+// --- (⑤) deck tracker --------------------------------------------------------
+
+// Build the per-type grid once per replay: one cell per tile type (sorted by id),
+// showing its id and a placed/total count. Cells are stored in R.deckCells so
+// scrubbing only rewrites the counts + toggles classes, never the DOM structure.
+// deckTotal is Σ counts across all types (72 for the base deck) — the denominator
+// of the "N / total placed" header.
+function buildDeck() {
+  const grid = $("deck-grid");
+  const cells = {};
+  const els = [];
+  let total = 0;
+  for (const type of Object.keys(R.tiledefs).sort()) {
+    total += R.tiledefs[type].count;
+    const cell = document.createElement("div");
+    cell.className = "deck-cell";
+    const id = document.createElement("span");
+    id.className = "deck-id mono";
+    id.textContent = type;
+    const cnt = document.createElement("span");
+    cnt.className = "deck-count mono";
+    cell.append(id, cnt);
+    cells[type] = { cell, cnt };
+    els.push(cell);
+  }
+  grid.replaceChildren(...els);
+  R.deckCells = cells;
+  R.deckTotal = total;
+}
+
+// Recompute placed-counts from states[R.index].tiles at the current step and push
+// them into the grid: header "N / total placed · M remaining", each cell's
+// placed/total, a "full" class when a type is exhausted, and a "current" ring on
+// the type about to be drawn (states[R.index].current_tile). A 30-type tally over
+// ≤72 tiles is cheap, so this runs on every scrub.
+function renderDeck() {
+  if (!R.data || !R.deckCells) return;
+  const view = R.data.states[R.index];
+  const placed = {};
+  for (const t of view.tiles) placed[t.type] = (placed[t.type] || 0) + 1;
+  const n = view.tiles.length;
+  $("deck-summary").textContent = `${n} / ${R.deckTotal} placed · ${R.deckTotal - n} remaining`;
+  const current = view.current_tile; // type about to be drawn (null at terminal)
+  for (const [type, { cell, cnt }] of Object.entries(R.deckCells)) {
+    const p = placed[type] || 0;
+    const total = R.tiledefs[type].count;
+    cnt.textContent = `${p}/${total}`;
+    cell.classList.toggle("full", p >= total);
+    cell.classList.toggle("current", type === current);
+  }
+}
+
 // --- board rendering ---------------------------------------------------------
 
 // The board at R.index is states[R.index] — the position BEFORE move R.index,
@@ -1034,11 +1091,13 @@ function showError(msg) {
 }
 
 function hidePanels() {
-  for (const id of ["scrubber", "move-info", "search-panel", "alt-panel", "winprob-panel", "score-panel"]) {
+  for (const id of ["scrubber", "move-info", "search-panel", "alt-panel", "winprob-panel", "score-panel", "deck-panel"]) {
     $(id).hidden = true;
   }
   $("move-list").replaceChildren();
   R.moveRows = null;
+  $("deck-grid").replaceChildren();
+  R.deckCells = null;
   $("empty-hint").style.display = "";
 }
 

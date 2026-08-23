@@ -926,6 +926,47 @@ dialog .actions {
   cursor: pointer;
 }
 
+/* (⑤) Deck tracker: a compact grid of every tile type with a placed/total count
+   at the current step. Game info, so player-neutral colours only (no --ai). */
+#deck-summary {
+  margin-bottom: 8px;
+}
+#deck-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(52px, 1fr));
+  gap: 4px;
+}
+.deck-cell {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px;
+  padding: 3px 5px;
+  border: 1px solid var(--hairline);
+  border-radius: 3px;
+  background: var(--stage-raised);
+  font-size: 11px;
+  line-height: 1.2;
+}
+.deck-id {
+  color: var(--bone);
+}
+.deck-count {
+  color: var(--bone-dim);
+}
+/* Fully placed: dim the whole cell so the eye skips exhausted types. */
+.deck-cell.full {
+  opacity: 0.4;
+}
+/* The tile about to be drawn at this step: a neutral bone ring, not --ai. */
+.deck-cell.current {
+  border-color: var(--bone);
+  box-shadow: inset 0 0 0 1px var(--bone);
+}
+.deck-cell.current .deck-id {
+  color: var(--bone);
+}
+
 /* --- training view --------------------------------------------------------- */
 
 .training-stage {
