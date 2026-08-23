@@ -29,7 +29,7 @@ contract, headlessly verified) — matching how the Play view was built.
 
 ## Pass A — restructure + per-move insight
 
-### Task 1: Backend — per-type tile count on /api/tiledefs
+### Task 1: Backend — per-type tile count on /api/tiledefs ✅ DONE (23b25bd)
 **Depends on:** none (independent; different files from the replay work)
 
 **Files:** Modify `carcassonne/web/views.py` (`tiledefs_view`). Test: `tests/web/test_api.py`.
