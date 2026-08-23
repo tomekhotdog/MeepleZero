@@ -617,7 +617,14 @@ async function boot() {
   await populateCheckpoints();
   updateSidebar();
   requestAnimationFrame(render);
-  dialog.showModal(); // choose opponent/seat/seed, then play
+  // Start a default game straight away so the board is playable and the top nav
+  // stays reachable. A modal dialog on load would sit in the browser top layer
+  // and block the nav links until dismissed. "New game" reconfigures any time.
+  try {
+    await newGame("greedy", 0, null);
+  } catch {
+    dialog.showModal(); // couldn't auto-start (e.g. server error) — let the user choose
+  }
 }
 
 boot();
