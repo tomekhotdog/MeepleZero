@@ -25,37 +25,35 @@ uv run carcassonne serve --checkpoints runs/first/checkpoints
 
 ## How it fits together
 
+**Choosing a move** — the inference path every agent turn takes:
+
 ```mermaid
 flowchart LR
-    subgraph engine["core/ + game/ — deterministic rules"]
-        GS["GameState<br>new_game · legal_moves · apply"]
-    end
+    GS["GameState<br>core/ — immutable,<br>deterministic"] --> ENC["Encoder<br>62×31×31"]
+    ENC --> NET["CarcassonneNet<br>policy 53,816 · value [−1,1]"]
+    NET --> MCTS["MctsAgent<br>PUCT search"]
+    GS -- "legal_moves · apply" --> MCTS
+    MCTS -- "Move" --> GS
+```
 
-    subgraph nn["nn/"]
-        ENC["Encoder<br>62×31×31"]
-        NET["CarcassonneNet<br>policy 53,816 · value [−1,1]"]
-    end
+**Training** — the AlphaZero loop, one iteration per cycle:
 
-    MCTS["MctsAgent<br>PUCT search"]
-
-    subgraph trainloop["training/ — AlphaZero loop"]
-        SP["SelfPlay<br>(best net, both seats)"]
-        BUF[("buffer.sqlite<br>targets only — states<br>re-derived by replay")]
-        LRN["Learner<br>policy CE + value MSE"]
-        GATE{"arena gate<br>win rate &gt; 0.55?"}
-    end
-
-    subgraph web["web/ — RL microscope"]
-        UI["Play vs checkpoints<br>Replay workbench · Training dashboard"]
-    end
-
-    GS --> ENC --> NET --> MCTS
-    GS --> MCTS
-    MCTS --> SP --> BUF --> LRN --> GATE
+```mermaid
+flowchart LR
+    SP["SelfPlay<br>best net, both seats"] --> BUF[("buffer.sqlite<br>targets only — states<br>re-derived by replay")]
+    BUF --> LRN["Learner<br>policy CE + value MSE"]
+    LRN --> GATE{"arena gate<br>win rate &gt; 0.55?"}
     GATE -- "promote: best ← learning" --> SP
-    SP -. "replays (JSONL)" .-> UI
-    LRN -. "checkpoints · metrics" .-> UI
-    MCTS -. "hints · prior vs visits" .-> UI
+    GATE -- "reject: best unchanged" --> SP
+```
+
+**The RL microscope** — every artifact the loop writes has a view in the web app:
+
+```mermaid
+flowchart LR
+    RPL["replays/ (JSONL)"] -.-> WORK["Replay workbench"]
+    CKPT["checkpoints/ (*.pt)"] -.-> PLAY["Play vs checkpoints<br>hints · prior vs visits"]
+    MET["metrics.jsonl"] -.-> DASH["Training dashboard<br>loss · gate win rates"]
 ```
 
 The dependency rule matches the arrows: `core → game → agents/nn → training/web`, enforced one-way — the engine knows nothing about the network, and the RL stack consumes the engine only through its five-function API.
