@@ -19,7 +19,12 @@ defined term; in docs, bold on first use per section.
   is always placed; abbot retrieval replaces the meeple step). One Move = one
   ply in the game tree.
 - **GameState** — the immutable complete state of a game: board, deck, supplies,
-  scores, current drawn tile, feature connectivity.
+  scores, current drawn tile, feature connectivity. Per-player state is sized
+  by the game's player count (2-5).
+- **Seat** — a player position, `0..num_players-1`; turn order rotates through
+  seats. "Player" in code is a seat index.
+- **Winners** — the tie set of top scorers at game end (singleton = outright
+  win, larger = shared win). Replaces the old binary `winner`.
 - **PlacedTile** — a Tile fixed on the board at a **Pos** (x, y grid coordinate)
   with a **Rotation** (0/90/180/270).
 
@@ -27,15 +32,19 @@ defined term; in docs, bold on first use per section.
 
 - **Engine** — the pure rules core (`carcassonne.core`); sole authority on
   legality and scoring, exposed as five functions.
-- **Replay** — a JSONL file fully describing one game: header (seed, config,
-  agents) + one line per Move, with optional **Annotation** (the AI's value
-  estimate, policy/visit distribution, sims, think time) per move.
+- **Replay** — a JSONL file fully describing one game: header (seed, config
+  incl. player count, agents) + one line per Move, with optional
+  **Annotation** (the AI's value estimate, policy/visit distribution, sims,
+  think time) per move; footer carries final scores and **Winners**.
+  Format v2; v1 (2-player) files remain loadable.
 
 ## Agents & search
 
 - **Agent** — anything implementing `choose(state, ctx) -> Move`; optionally
-  exposes a policy for visualisation. Implementations: **RandomAgent**,
-  **GreedyAgent** (1-ply heuristic yardstick), **MctsAgent**.
+  exposes a policy for visualisation. Implementations: **RandomAgent** (any
+  player count), **GreedyAgent** (1-ply heuristic yardstick: my delta minus
+  best-of-rest delta; any player count), **MctsAgent** (2-player only —
+  raises on other player counts).
 - **Policy** — a probability distribution over legal Moves (from the network's
   policy head or MCTS visit counts).
 - **Value** — the network's estimated game outcome in [-1, 1] from the
