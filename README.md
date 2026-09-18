@@ -23,6 +23,43 @@ uv run carcassonne train --run runs/first --resume   # continue after any interr
 uv run carcassonne serve --checkpoints runs/first/checkpoints
 ```
 
+## How it fits together
+
+```mermaid
+flowchart LR
+    subgraph engine["core/ + game/ — deterministic rules"]
+        GS["GameState<br>new_game · legal_moves · apply"]
+    end
+
+    subgraph nn["nn/"]
+        ENC["Encoder<br>62×31×31"]
+        NET["CarcassonneNet<br>policy 53,816 · value [−1,1]"]
+    end
+
+    MCTS["MctsAgent<br>PUCT search"]
+
+    subgraph trainloop["training/ — AlphaZero loop"]
+        SP["SelfPlay<br>(best net, both seats)"]
+        BUF[("buffer.sqlite<br>targets only — states<br>re-derived by replay")]
+        LRN["Learner<br>policy CE + value MSE"]
+        GATE{"arena gate<br>win rate &gt; 0.55?"}
+    end
+
+    subgraph web["web/ — RL microscope"]
+        UI["Play vs checkpoints<br>Replay workbench · Training dashboard"]
+    end
+
+    GS --> ENC --> NET --> MCTS
+    GS --> MCTS
+    MCTS --> SP --> BUF --> LRN --> GATE
+    GATE -- "promote: best ← learning" --> SP
+    SP -. "replays (JSONL)" .-> UI
+    LRN -. "checkpoints · metrics" .-> UI
+    MCTS -. "hints · prior vs visits" .-> UI
+```
+
+The dependency rule matches the arrows: `core → game → agents/nn → training/web`, enforced one-way — the engine knows nothing about the network, and the RL stack consumes the engine only through its five-function API.
+
 ## The RL setup at a glance
 
 | Piece | Design |
