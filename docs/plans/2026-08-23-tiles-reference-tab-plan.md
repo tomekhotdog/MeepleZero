@@ -452,6 +452,6 @@ git add -A && git commit -m "fix(web): tiles atlas — <defect> from headless ve
 ---
 
 ## Review
-- [ ] Code review requested (final `code-reviewer` over all three tasks)
-- [ ] All feedback addressed
-- [ ] Final verification passed (`verify` skill: full suite green, ruff, mypy, headless `ok:true`)
+- [x] Code review requested (final `code-reviewer` over all three tasks) — READY, no blocking/important findings
+- [x] All feedback addressed (shield-aria fix e12a4c7; relative-import nit 483d291)
+- [x] Final verification passed (`verify` skill: full suite green, ruff, mypy, headless `ok:true`)
