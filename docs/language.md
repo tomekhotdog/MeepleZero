@@ -54,17 +54,28 @@ defined term; in docs, bold on first use per section.
 
 ## Neural network
 
-- **Encoder** — maps a GameState to fixed-size tensor planes (windowed board crop).
-- **ActionIndexer** — the deterministic bijection between Moves and policy-head
-  indices, with legal-move masking.
+- **Crop** — the per-state board window fed to the network: the bounding box
+  of placed tiles plus a 1-cell border. By the adjacency rule it contains
+  every legal placement; its size H×W varies per state (replaces the fixed
+  31×31 window).
+- **Encoder** — maps a GameState to `(planes, H, W)` tensor planes over the
+  Crop; includes FeaturePlanes and the current tile as structural property
+  planes.
+- **FeaturePlanes** — input planes derived from the engine's feature graph
+  (per-tile city/road size, open-edge count, meeple ownership); hands the
+  net long-range connectivity instead of making convs infer it.
+- **ActionIndexer** — the deterministic bijection between Moves and policy
+  indices, with legal-move masking. Moves are keyed by world coordinates
+  `(pos, rotation, sub-action)`; Crop grid indices are an encode-time detail.
 - **Checkpoint** — a saved network (weights + config + training step id);
-  playable from the web app.
+  playable from the web app. Pre-iteration-3 (31×31) checkpoints do not load.
 
 ## Training
 
 - **TrainingRun** — a directory holding everything about one training session
   (config, checkpoints, replays, buffer, metrics); resumable unit of work.
-- **SelfPlay** — MctsAgent vs itself generating Replays + policy targets.
+- **SelfPlay** — MctsAgent vs itself generating Replays + policy targets;
+  runs as a multiprocess worker pool (one full game per worker).
 - **ReplayBuffer** — the on-disk window of recent positions the learner samples.
 - **Arena** — head-to-head evaluation: candidate vs current-best (gating,
   promote on >55%) and vs GreedyAgent (absolute yardstick).

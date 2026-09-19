@@ -2,7 +2,9 @@
 
 High-level user journeys. Status: journeys 1-6 **implemented** (iteration 1
 complete, 2026-08-22; 174 tests green); multiplayer additions marked
-*(planned, iteration 2)* per `docs/plans/2026-08-23-multiplayer-engine-design.md`.
+*(planned, iteration 2)* per `docs/plans/2026-08-23-multiplayer-engine-design.md`;
+training-efficiency additions marked *(planned, iteration 3)* per
+`docs/plans/2026-09-19-dynamic-crop-nn-design.md`.
 Two iteration-1 success criteria are runtime outcomes rather than code —
 training an agent to beat greedy >70%, and a multi-day run on the Pi — see
 `docs/plans/2026-08-22-iteration1-verification.md`.
@@ -41,6 +43,11 @@ workers generate games, the learner updates the network, the Arena gates
 promotions. Interrupt at any time; `train --resume <run-dir>` continues losslessly.
 Training is **strictly 2-player**; the RL stack raises loudly on other player
 counts rather than failing silently. *(guards planned, iteration 2)*
+*(planned, iteration 3)*: the network sees a dynamic **Crop** (board bounding
+box + 1) instead of a fixed 31×31 window, with **FeaturePlanes** from the
+feature graph; self-play runs on a multiprocess worker pool with MCTS tree
+reuse — an order-of-magnitude throughput gain on the Pi, ~200k-param net.
+Pre-iteration-3 checkpoints stop loading (clean break).
 
 ## 5. Watch training
 

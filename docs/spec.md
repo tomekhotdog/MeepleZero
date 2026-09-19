@@ -40,6 +40,30 @@ file format.
   count), **GreedyAgent** (1-ply heuristic yardstick: my delta minus
   best-of-rest delta; any player count), **MctsAgent** (PUCT search guided by
   a policy/value network, AlphaZero-style; **2-player only, enforced**).
+  MctsAgent reuses the search subtree across moves where the realized tile
+  draw matches the searched branch.
+
+## Neural network — dynamic crop, fully convolutional
+
+- The **Encoder** maps a GameState to `(planes, H, W)` where H×W is the
+  **Crop**: the bounding box of placed tiles plus a 1-cell border — by the
+  adjacency rule the border contains every legal placement, so every legal
+  move is always representable (no fixed window, no silent drops).
+- ~48 input planes: spatial board planes (occupancy, edge kinds, meeples,
+  shields, monastery fill), **FeaturePlanes** derived from the engine's
+  feature graph (per-tile city/road size, open edges, meeple ownership),
+  the current tile as ~15 structural property planes (edges + flags, not a
+  tile-ID one-hot), and 8 broadcast scalars (scores, supplies, deck, turn).
+- Fully convolutional residual trunk (GroupNorm; default 48 channels ×
+  4 blocks, ~200k params) that accepts any crop size. Policy head: 1×1 conv
+  → 4 rotations × 14 sub-actions per cell (H·W·56 logits per state). Value
+  head: 1×1 conv → masked global-average pool over true crop cells → small
+  MLP → tanh.
+- Actions are natively `(world_pos, rotation, sub-action)`; buffer policy
+  targets are keyed by world coordinates and mapped to crop indices at
+  encode time. Learner batches pad to the batch max; padding is semantically
+  empty board and excluded from value pooling (padded forward == unpadded
+  forward is a tested invariant).
 
 ## Training — strictly 2-player
 
@@ -49,15 +73,18 @@ it never fails silently. Multiplayer RL (max^n search, vector value heads) is
 deferred research; groundwork in
 `docs/plans/2026-08-23-multiplayer-3-5-research.md`.
 
-- Single-machine loop via `train` CLI: sequential self-play → on-disk replay
-  buffer → learner (policy CE + value MSE) → **Arena** gating (promote candidate
-  on >55% vs current best; GreedyAgent as absolute yardstick). (Self-play is
-  sequential; a multiprocess worker pool is a planned follow-up.)
+- Single-machine loop via `train` CLI: **multiprocess self-play** (worker
+  pool, default = core count, one game per worker, torch intra-op threads
+  pinned to 1) → on-disk replay buffer → learner (policy CE + value MSE,
+  C4-rotation augmentation) → **Arena** gating (promote candidate on >55% vs
+  current best; GreedyAgent as absolute yardstick). Arena games use the same
+  worker pool. MCTS leaf evaluation stays unbatched (deliberate deferral).
 - A **TrainingRun** is a directory (config, checkpoints, replays, buffer,
   metrics); fully resumable with `--resume` — required for multi-day runs on a
   Raspberry Pi 5. Development/prove-out is CPU-only on this Intel Mac (no MPS —
   Apple-Silicon only); training on the Pi (aarch64 CPU). Network sized for Pi
-  inference (small residual CNN).
+  inference; per-evaluation compute scales with actual board area, not a
+  fixed window.
 
 ## Web app — the RL microscope
 
@@ -78,24 +105,28 @@ without it.
 3. **Training** — live view of a TrainingRun: loss curves, arena win rates,
    games generated, checkpoint timeline.
 
-## Success bar (iteration 2 — multiplayer engine)
+## Success bar (iteration 3 — dynamic-crop representation & throughput)
 
-1. Engine property tests (meeple conservation, replay determinism, legality,
-   turn rotation) pass parametrised over 2-5 players; full existing suite
-   stays green.
-2. `simulate` runs a 5-player greedy-vs-randoms game to completion and the
-   Replay opens in the Replay view.
-3. Browser Play: one human vs 3 agents end-to-end, correct per-seat scoring,
-   game saved and reviewable.
-4. Encoder and MctsAgent demonstrably raise on a 3-player state (tests);
-   existing 2-player checkpoints load and play unchanged.
+1. Full suite green, including new invariants: crop contains all legal moves;
+   mask ↔ `legal_moves` bijection; padded forward == unpadded forward; D4
+   equivariance on dynamic crops.
+2. `param_count` ≤ 250k at new defaults.
+3. Measured self-play throughput ≥ 5× the 31×31 baseline on the Mac at equal
+   sims (single process), ~linear scaling to 4 workers.
+4. End-to-end smoke train run completes and resumes.
+5. Yardstick vs GreedyAgent at least matches the old net's trajectory at
+   equal games generated.
 
 Iteration-1 bar (rules engine proven; trained agent beats GreedyAgent >70%;
-browser play vs AI; resumable Pi run) remains in force — see
-`docs/plans/2026-08-22-iteration1-verification.md`.
+browser play vs AI; resumable Pi run) and iteration-2 bar (engine parametric
+over 2-5 players) remain in force. Note: iteration 3 is a clean break for
+checkpoints and buffers — pre-iteration-3 checkpoints (31×31 format) no
+longer load; there are no real training runs worth migrating.
 
 ## Explicitly out of scope
 
 Farmers, expansions beyond the abbot, multiplayer RL training (max^n / vector
 value heads), multi-human play, arena/evaluate for 3+ players, Gymnasium
-adapter (provisioned but unbuilt), distributed training, web auth.
+adapter (provisioned but unbuilt), distributed training, MCTS leaf-eval
+batching, quantization/torch.compile, GNN representations, checkpoint
+migration from the 31×31 format, web auth.
