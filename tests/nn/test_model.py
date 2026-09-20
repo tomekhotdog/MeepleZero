@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import itertools
 import random
 
 import numpy as np
@@ -7,9 +8,14 @@ import torch
 
 from carcassonne.core import GameConfig, apply, legal_moves, new_game
 from carcassonne.core.engine import GameState
-from carcassonne.nn.actions import Crop, encode_move
+from carcassonne.nn.actions import ACTIONS, ACTIONS_PER_CELL, ROTS, Crop, encode_move, flat_index
 from carcassonne.nn.encode import NUM_PLANES, encode_state, valid_mask
-from carcassonne.nn.model import CarcassonneNet, evaluate_state, param_count
+from carcassonne.nn.model import (
+    CarcassonneNet,
+    _policy_head_flatten,
+    evaluate_state,
+    param_count,
+)
 
 
 def _mid_state(seed: int = 5, n_moves: int = 10) -> GameState:
@@ -29,17 +35,43 @@ def test_param_budget() -> None:
     assert param_count(CarcassonneNet()) <= 250_000  # design bar; expect ~192k
 
 
+def test_policy_flatten_matches_action_indexer_exactly() -> None:
+    """THE alignment proof for the most bug-prone reshape in the project.
+
+    Fill the conv output with unique values so every (channel, gy, gx) slot is
+    distinguishable, then check that the value at every flat index is exactly
+    the one from cell (gy, gx), channel rot*14+a — where the flat index comes
+    from the ActionIndexer's own `flat_index`, not a re-derived formula. Any
+    permutation error (swapped rot/a split, transposed gy/gx) fails loudly.
+    """
+    h, w = 3, 5  # non-square so transposed axes cannot alias
+    t = torch.arange(ACTIONS_PER_CELL * h * w, dtype=torch.float32).reshape(
+        1, ACTIONS_PER_CELL, h, w
+    )
+    flat = _policy_head_flatten(t)
+    assert flat.shape == (1, h * w * ACTIONS_PER_CELL)
+    crop = Crop(0, 0, h, w)  # world == grid coordinates
+    for gy, gx, rot, a in itertools.product(range(h), range(w), range(ROTS), range(ACTIONS)):
+        idx = flat_index(crop, (gx, gy, rot, a))
+        assert flat[0, idx] == t[0, rot * ACTIONS + a, gy, gx]
+
+
 def test_policy_head_matches_action_indexer() -> None:
-    """Logit at flat index i must come from cell (gy,gx) channel rot*14+a."""
+    """End-to-end: masked softmax puts nonzero mass on exactly the legal set."""
+    from carcassonne.nn.actions import legal_mask
+
     net = _tiny_net()
     state = _mid_state()
     crop = Crop.of(state)
     x = torch.from_numpy(encode_state(state)).unsqueeze(0)
-    logits, _ = net(x)
+    mask = torch.from_numpy(legal_mask(state)).unsqueeze(0)
+    logits, _ = net(x, mask=mask)
     assert logits.shape == (1, crop.n_actions)
-    for m in legal_moves(state)[:5]:
-        i = encode_move(state, m)
-        assert torch.isfinite(logits[0, i])
+    probs = torch.softmax(logits, dim=1).squeeze(0)
+    legal = {encode_move(state, m) for m in legal_moves(state)}
+    # Exact partition: with a tiny random net logits are small, so no legal
+    # move's probability can underflow to zero — equality is safe here.
+    assert {int(i) for i in torch.nonzero(probs).flatten()} == legal
 
 
 def test_forward_accepts_any_size() -> None:
@@ -94,4 +126,8 @@ def test_evaluate_state_bridge() -> None:
     assert abs(float(probs.sum()) - 1.0) < 1e-4
     assert -1.0 <= value <= 1.0
     legal = {encode_move(state, m) for m in legal_moves(state)}
+    # Deliberately issubset, not equality: this bridge test runs softmax on
+    # float32 probs where a trained net's sharp policy could legitimately
+    # underflow a legal move to exactly 0. Exact partition is proven above in
+    # test_policy_head_matches_action_indexer with a small-logit net.
     assert set(np.nonzero(probs)[0]).issubset(legal)
