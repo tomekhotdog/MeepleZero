@@ -265,5 +265,5 @@ def test_encode_rejects_non_two_player_state() -> None:
 def test_encode_rejects_padding_smaller_than_crop() -> None:
     state = _mid_state()
     crop = Crop.of(state)
-    with pytest.raises(AssertionError):
+    with pytest.raises(RulesError, match="padding"):
         encode_state(state, pad_hw=(crop.h - 1, crop.w))

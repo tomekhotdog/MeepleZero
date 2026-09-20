@@ -17,7 +17,10 @@ FeaturePlanes (8): per-cell max over the {city, road} features touching the
 tile, from the engine's FeatureIndex: normalised size, normalised open-edge
 count, my/opp meeple count. Hands the net long-range connectivity that convs
 cannot infer across snaky features. (Subsumes the old ``completed`` plane:
-completed <=> open == 0.)
+completed <=> open == 0.) The max is per component: on a tile carrying two
+same-kind features (H, H_G, I have two cities), a cell can read as a composite
+matching neither real feature (city A's size with city B's meeple count) -- a
+deliberate, accepted approximation.
 
 Current tile (15, broadcast over the crop): the drawn tile's R0 edge kinds
 (12) + monastery/garden/shield flags -- structural properties, not a tile-ID
@@ -118,7 +121,10 @@ def encode_state(
         )
     c = crop or Crop.of(state)
     ph, pw = pad_hw or (c.h, c.w)
-    assert ph >= c.h and pw >= c.w, f"padding {(ph, pw)} smaller than crop {(c.h, c.w)}"
+    if not (ph >= c.h and pw >= c.w):
+        # Too-small padding would silently truncate cells — fail loud, and never
+        # stripped by ``python -O`` (matches legal_mask's guard in actions.py).
+        raise RulesError(f"padding {(ph, pw)} smaller than crop {(c.h, c.w)}")
     planes = np.zeros((NUM_PLANES, ph, pw), dtype=np.float32)
     me = state.current_player
     opp = 1 - me
@@ -132,7 +138,7 @@ def encode_state(
             ki = _EDGE_KINDS.index(world_edge(tt, placed.rotation, side))
             planes[_EDGE0 + si * 3 + ki, gy, gx] = 1.0
         has_monastic = False
-        for i, f in enumerate(tt.features):
+        for f in tt.features:
             if f.shield:
                 planes[_SHIELD, gy, gx] = 1.0
             if f.kind is FeatureKind.MONASTERY:
@@ -141,24 +147,31 @@ def encode_state(
             elif f.kind is FeatureKind.GARDEN:
                 planes[_GARDEN, gy, gx] = 1.0
                 has_monastic = True
-            elif f.kind in _FP_KINDS:
-                d = state.features.root_data((pos, i))
-                base = _FP0 + _FP_KINDS.index(f.kind) * 4
-                mine = sum(1 for m in d.meeples if m.player == me)
-                theirs = sum(1 for m in d.meeples if m.player == opp)
-                vals = (
-                    min(len(d.tiles), _SIZE_CAP) / _SIZE_CAP,
-                    min(d.open_edges, _OPEN_CAP) / _OPEN_CAP,
-                    min(mine, _MEEPLE_CAP) / _MEEPLE_CAP,
-                    min(theirs, _MEEPLE_CAP) / _MEEPLE_CAP,
-                )
-                for j, v in enumerate(vals):  # max-aggregate over same-kind features
-                    planes[base + j, gy, gx] = max(planes[base + j, gy, gx], v)
         if has_monastic:
             occupied_n = sum(1 for q in neighbours8(pos) if q in board)
             planes[_MONFILL, gy, gx] = occupied_n / 8.0
 
+    # One pass over feature roots (no per-tile union-find walks -- encode runs
+    # at every MCTS leaf): FeaturePlanes max-painted onto every tile the root
+    # spans, then meeple-owner planes. The per-cell max over same-kind features
+    # is unchanged vs painting per tile-feature slot: a tile carrying two
+    # same-kind features appears in both roots' tile sets. See the module
+    # docstring for the accepted composite-value approximation.
     for d in state.features.data.values():
+        if d.kind in _FP_KINDS:
+            base = _FP0 + _FP_KINDS.index(d.kind) * 4
+            mine = sum(1 for m in d.meeples if m.player == me)
+            theirs = sum(1 for m in d.meeples if m.player == opp)
+            vals = (
+                min(len(d.tiles), _SIZE_CAP) / _SIZE_CAP,
+                min(d.open_edges, _OPEN_CAP) / _OPEN_CAP,
+                min(mine, _MEEPLE_CAP) / _MEEPLE_CAP,
+                min(theirs, _MEEPLE_CAP) / _MEEPLE_CAP,
+            )
+            for tp in d.tiles:
+                gx, gy = tp.x - c.ox, tp.y - c.oy
+                for j, v in enumerate(vals):
+                    planes[base + j, gy, gx] = max(planes[base + j, gy, gx], v)
         for m in d.meeples:
             mpos, _feat = m.node
             gx, gy = mpos.x - c.ox, mpos.y - c.oy
