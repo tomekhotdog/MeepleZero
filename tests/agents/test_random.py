@@ -60,15 +60,15 @@ def test_play_game_completes_and_result_is_consistent() -> None:
     assert result.turns > 0
     s0, s1 = result.final_scores
     if s0 == s1:
-        assert result.winner is None
+        assert result.winners == (0, 1)
     else:
-        assert result.winner == (0 if s0 > s1 else 1)
+        assert result.winners == ((0,) if s0 > s1 else (1,))
 
 
 def test_play_game_deterministic_for_seed() -> None:
     r1 = play_game((RandomAgent(), RandomAgent()), seed=SEED)
     r2 = play_game((RandomAgent(), RandomAgent()), seed=SEED)
-    assert (r1.final_scores, r1.winner, r1.turns) == (r2.final_scores, r2.winner, r2.turns)
+    assert (r1.final_scores, r1.winners, r1.turns) == (r2.final_scores, r2.winners, r2.turns)
 
 
 def test_play_game_writes_fully_verifiable_replay(tmp_path: Path) -> None:
@@ -86,7 +86,7 @@ def test_play_game_writes_fully_verifiable_replay(tmp_path: Path) -> None:
     assert replay.header.agents == ("random", "random")
     assert replay.header.started_at == STARTED_AT
     assert replay.final_scores == result.final_scores
-    assert replay.winners == ((0, 1) if result.winner is None else (result.winner,))
+    assert replay.winners == result.winners
     assert len(replay.moves) == result.turns
 
     states = list(replay_states(replay))  # re-derives and verifies every move

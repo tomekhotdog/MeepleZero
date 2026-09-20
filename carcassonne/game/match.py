@@ -1,4 +1,4 @@
-"""Match runner: play one full game between two agents, optionally recording a replay.
+"""Match runner: play one full game between N agents, optionally recording a replay.
 
 This is the orchestration layer — wall-clock timestamps live here; everything
 below it (core, replay) is deterministic.
@@ -9,13 +9,14 @@ from __future__ import annotations
 import contextlib
 import random
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from carcassonne.core import GameConfig, apply, final_scores, is_terminal, new_game
+from carcassonne.core import GameConfig, RulesError, apply, final_scores, is_terminal, new_game
 from carcassonne.game.agent import Agent, TurnContext
-from carcassonne.game.replay import REPLAY_VERSION, ReplayHeader, ReplayWriter
+from carcassonne.game.replay import REPLAY_VERSION, ReplayHeader, ReplayWriter, winners_of
 
 _DEFAULT_CONFIG = GameConfig()
 _RNG_SALT = 0x5EED  # agents' rng stream must differ from the deck-shuffle seed
@@ -24,13 +25,13 @@ _RNG_SALT = 0x5EED  # agents' rng stream must differ from the deck-shuffle seed
 @dataclass(frozen=True, slots=True)
 class GameResult:
     final_scores: tuple[int, ...]
-    winner: int | None  # 0 | 1 | None (draw)
+    winners: tuple[int, ...]  # tie set: singleton = outright win, larger = shared
     turns: int
     replay_path: Path | None
 
 
 def play_game(
-    agents: tuple[Agent, Agent],
+    agents: Sequence[Agent],
     seed: int,
     replay_dir: Path | None = None,
     config: GameConfig = _DEFAULT_CONFIG,
@@ -42,6 +43,8 @@ def play_game(
     agent or the engine raises mid-game, the writer's context manager leaves an
     incomplete file behind as a crash artifact (which `load_replay` refuses).
     """
+    if len(agents) != config.num_players:
+        raise RulesError(f"{len(agents)} agents for a {config.num_players}-player game")
     if started_at is None:
         started_at = datetime.now(UTC).isoformat(timespec="seconds")
     state = new_game(seed, config)
@@ -55,7 +58,7 @@ def play_game(
             v=REPLAY_VERSION,
             seed=seed,
             config=config,
-            agents=(agents[0].name, agents[1].name),
+            agents=tuple(a.name for a in agents),
             checkpoint=None,
             started_at=started_at,
         )
@@ -76,19 +79,14 @@ def play_game(
         finals = final_scores(state)
         if writer is not None:
             writer.finish(finals)
-    return GameResult(final_scores=finals, winner=_winner(finals), turns=n, replay_path=path)
-
-
-def _winner(scores: tuple[int, ...]) -> int | None:
-    if scores[0] == scores[1]:
-        return None
-    return 0 if scores[0] > scores[1] else 1
+    return GameResult(final_scores=finals, winners=winners_of(finals), turns=n, replay_path=path)
 
 
 def _unique_replay_path(
-    replay_dir: Path, started_at: str, seed: int, agents: tuple[Agent, Agent]
+    replay_dir: Path, started_at: str, seed: int, agents: Sequence[Agent]
 ) -> Path:
-    raw = f"{started_at or 'game'}_{seed}_{agents[0].name}-vs-{agents[1].name}"
+    names = "-vs-".join(a.name for a in agents)
+    raw = f"{started_at or 'game'}_{seed}_{names}"
     base = re.sub(r"[^A-Za-z0-9._-]", "-", raw)
     path = replay_dir / f"{base}.jsonl"
     counter = 1

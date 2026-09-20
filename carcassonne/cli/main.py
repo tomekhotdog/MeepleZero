@@ -10,7 +10,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from carcassonne.agents import make_agent
-from carcassonne.game.arena import run_match
+from carcassonne.game.arena import run_match, winner_2p
 from carcassonne.game.match import play_game
 
 
@@ -112,15 +112,16 @@ def _simulate(args: argparse.Namespace) -> int:
         result = play_game(agents, seed, replay_dir=replay_dir)
         line = (
             f"game {i}: seed={seed} scores={result.final_scores}"
-            f" winner={result.winner} turns={result.turns}"
+            f" winners={list(result.winners)} turns={result.turns}"
         )
         if result.replay_path is not None:
             line += f" replay={result.replay_path}"
         print(line)
-        if result.winner is None:
+        w = winner_2p(result.winners)
+        if w is None:
             draws += 1
         else:
-            wins[result.winner] += 1
+            wins[w] += 1
     print(
         f"summary: p0[{agents[0].name}] wins={wins[0]}"
         f" p1[{agents[1].name}] wins={wins[1]} draws={draws}"
@@ -139,7 +140,7 @@ def _evaluate(args: argparse.Namespace) -> int:
     for i, g in enumerate(r.results):
         line = (
             f"game {i}: seed={args.seed + i} scores={g.final_scores}"
-            f" winner={g.winner} turns={g.turns}"
+            f" winners={list(g.winners)} turns={g.turns}"
         )
         if g.replay_path is not None:
             line += f" replay={g.replay_path}"

@@ -9,6 +9,11 @@ from carcassonne.game.agent import Agent
 from carcassonne.game.match import GameResult, play_game
 
 
+def winner_2p(winners: tuple[int, ...]) -> int | None:
+    """Collapse a 2-player winners tie set to the old 0/1/None convention."""
+    return winners[0] if len(winners) == 1 else None
+
+
 @dataclass(frozen=True, slots=True)
 class MatchResult:
     """Aggregate of run_match. Everything — wins, mean_scores, and each entry in
@@ -47,10 +52,11 @@ def run_match(
         if swapped:
             result = _flipped(result)
         results.append(result)
-        if result.winner is None:
+        w = winner_2p(result.winners)
+        if w is None:
             draws += 1
         else:
-            wins[result.winner] += 1
+            wins[w] += 1
         totals[0] += result.final_scores[0]
         totals[1] += result.final_scores[1]
     n = max(n_games, 1)  # 0 games -> means of 0.0, not ZeroDivisionError
@@ -66,7 +72,7 @@ def run_match(
 def _flipped(r: GameResult) -> GameResult:
     return GameResult(
         final_scores=(r.final_scores[1], r.final_scores[0]),
-        winner=None if r.winner is None else 1 - r.winner,
+        winners=tuple(sorted(1 - w for w in r.winners)),
         turns=r.turns,
         replay_path=r.replay_path,
     )

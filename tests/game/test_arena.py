@@ -22,8 +22,7 @@ def test_run_match_swaps_seats_and_maps_results_back(tmp_path: Path) -> None:
     # The swapped game's result is mapped back to (a, b) order.
     raw = play_game((RandomAgent(), GreedyAgent()), seed=4)
     assert r.results[1].final_scores == (raw.final_scores[1], raw.final_scores[0])
-    winner = None if raw.winner is None else 1 - raw.winner
-    assert r.results[1].winner == winner
+    assert r.results[1].winners == tuple(sorted(1 - w for w in raw.winners))
 
 
 def test_run_match_no_swap_is_deterministic_with_correct_aggregates() -> None:
