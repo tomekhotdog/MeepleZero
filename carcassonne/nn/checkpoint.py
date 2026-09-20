@@ -14,7 +14,6 @@ from typing import Any
 
 import torch
 
-from carcassonne.nn.actions import ACTION_SPACE
 from carcassonne.nn.model import CarcassonneNet
 
 CheckpointId = str  # a checkpoint's filename stem, e.g. "step_000123"
@@ -41,7 +40,6 @@ def _net_arch(net: CarcassonneNet) -> dict[str, int]:
         "channels": net.channels,
         "n_blocks": net.n_blocks,
         "num_planes": net.num_planes,
-        "action_space": ACTION_SPACE,
     }
 
 

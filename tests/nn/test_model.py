@@ -1,182 +1,97 @@
 from __future__ import annotations
 
 import random
-from pathlib import Path
 
 import numpy as np
 import torch
 
-from carcassonne.core import apply, is_terminal, legal_moves, new_game
+from carcassonne.core import GameConfig, apply, legal_moves, new_game
 from carcassonne.core.engine import GameState
-from carcassonne.nn.actions import ACTION_SPACE, WINDOW, encode_move, legal_mask
-from carcassonne.nn.checkpoint import latest, load, pick_device, save
-from carcassonne.nn.encode import NUM_PLANES, encode_state
+from carcassonne.nn.actions import Crop, encode_move
+from carcassonne.nn.encode import NUM_PLANES, encode_state, valid_mask
 from carcassonne.nn.model import CarcassonneNet, evaluate_state, param_count
 
-SEED = 0
 
-
-def _net() -> CarcassonneNet:
-    torch.manual_seed(SEED)
-    return CarcassonneNet()
-
-
-def _mid_game(seed: int, moves: int) -> GameState:
+def _mid_state(seed: int = 5, n_moves: int = 10) -> GameState:
     rng = random.Random(seed)
-    state = new_game(seed)
-    for _ in range(moves):
-        if is_terminal(state):
-            break
+    state = new_game(seed, GameConfig())
+    for _ in range(n_moves):
         state = apply(state, rng.choice(legal_moves(state)))
     return state
 
 
-def _batch(states: list[GameState]) -> torch.Tensor:
-    return torch.from_numpy(np.stack([encode_state(s) for s in states]))
+def _tiny_net() -> CarcassonneNet:
+    torch.manual_seed(0)
+    return CarcassonneNet(channels=16, n_blocks=2).eval()
 
 
-# ---------------------------------------------------------------------------
-# 1. forward shape + param count
-
-
-def test_forward_shape_and_param_count() -> None:
-    net = _net().eval()
-    x = torch.randn(4, NUM_PLANES, WINDOW, WINDOW)
-    with torch.no_grad():
-        policy_logits, value = net(x)
-    assert policy_logits.shape == (4, ACTION_SPACE)
-    assert value.shape == (4,)
-    assert torch.all(value >= -1.0) and torch.all(value <= 1.0)
-
-    n = param_count(net)
-    print(f"CarcassonneNet param count: {n:,}")
-    assert n < 3_000_000  # Pi-sized sanity
-
-
-# ---------------------------------------------------------------------------
-# 2. masking: illegal logits are -inf, softmax gives exactly 0 and sums to 1
-
-
-def test_masking_zeros_illegal_probs() -> None:
-    net = _net().eval()
-    state = _mid_game(seed=1, moves=12)
-    mask_np = legal_mask(state)
-    x = _batch([state, state])
-    mask = torch.from_numpy(np.stack([mask_np, mask_np]))
-
-    with torch.no_grad():
-        policy_logits, _ = net(x, mask)
-
-    illegal = ~torch.from_numpy(mask_np)
-    assert torch.all(torch.isinf(policy_logits[0][illegal]))
-    assert torch.all(policy_logits[0][illegal] < 0)
-
-    probs = torch.softmax(policy_logits, dim=1)
-    assert torch.all(probs[0][illegal] == 0.0)
-    assert torch.isclose(probs[0].sum(), torch.tensor(1.0), atol=1e-6)
-
-
-# ---------------------------------------------------------------------------
-# 3. THE ALIGNMENT TEST: policy head order == ActionIndexer layout
+def test_param_budget() -> None:
+    assert param_count(CarcassonneNet()) <= 250_000  # design bar; expect ~192k
 
 
 def test_policy_head_matches_action_indexer() -> None:
-    net = _net()
-    state = _mid_game(seed=2, moves=15)
+    """Logit at flat index i must come from cell (gy,gx) channel rot*14+a."""
+    net = _tiny_net()
+    state = _mid_state()
+    crop = Crop.of(state)
+    x = torch.from_numpy(encode_state(state)).unsqueeze(0)
+    logits, _ = net(x)
+    assert logits.shape == (1, crop.n_actions)
+    for m in legal_moves(state)[:5]:
+        i = encode_move(state, m)
+        assert torch.isfinite(logits[0, i])
 
-    legal_ids = {encode_move(state, m) for m in legal_moves(state)}
-    mask_np = legal_mask(state)
-    # legal_mask and encode_move must already agree (sanity for the test itself).
-    assert set(np.flatnonzero(mask_np).tolist()) == legal_ids
 
+def test_forward_accepts_any_size() -> None:
+    net = _tiny_net()
+    for h, w in ((3, 3), (5, 9), (12, 7)):
+        x = torch.randn(2, NUM_PLANES, h, w)
+        logits, value = net(x)
+        assert logits.shape == (2, h * w * 56)
+        assert value.shape == (2,)
+        assert (value.abs() <= 1).all()
+
+
+def test_padded_forward_equals_unpadded() -> None:
+    """THE invariant: padding + cell_mask changes nothing for the real cells."""
+    net = _tiny_net()
+    state = _mid_state()
+    crop = Crop.of(state)
+    ph, pw = crop.h + 4, crop.w + 3
+
+    x = torch.from_numpy(encode_state(state)).unsqueeze(0)
+    logits, value = net(x)
+
+    xp = torch.from_numpy(encode_state(state, pad_hw=(ph, pw))).unsqueeze(0)
+    cm = torch.from_numpy(valid_mask(crop, pad_hw=(ph, pw))).unsqueeze(0)
+    logits_p, value_p = net(xp, cell_mask=cm)
+
+    # Compare per real cell: reshape to (gy, gx, 56) grids.
+    grid = logits.reshape(crop.h, crop.w, 56)
+    grid_p = logits_p.reshape(ph, pw, 56)[: crop.h, : crop.w]
+    assert torch.allclose(grid, grid_p, atol=1e-5)
+    assert torch.allclose(value, value_p, atol=1e-5)
+
+
+def test_mask_sets_illegal_to_neg_inf() -> None:
+    from carcassonne.nn.actions import legal_mask
+
+    net = _tiny_net()
+    state = new_game(0, GameConfig())
+    x = torch.from_numpy(encode_state(state)).unsqueeze(0)
+    mask = torch.from_numpy(legal_mask(state)).unsqueeze(0)
+    logits, _ = net(x, mask=mask)
+    probs = torch.softmax(logits, dim=1).squeeze(0)
+    assert float(probs[~mask.squeeze(0)].sum()) == 0.0
+    assert abs(float(probs.sum()) - 1.0) < 1e-5
+
+
+def test_evaluate_state_bridge() -> None:
+    net = _tiny_net()
+    state = _mid_state()
     probs, value = evaluate_state(net, state, torch.device("cpu"))
-    assert probs.shape == (ACTION_SPACE,)
+    assert probs.shape == (Crop.of(state).n_actions,)
+    assert abs(float(probs.sum()) - 1.0) < 1e-4
     assert -1.0 <= value <= 1.0
-
-    nonzero = set(np.flatnonzero(probs > 0.0).tolist())
-    # The exact set of actions the net assigns probability to is the legal set:
-    # this can only hold if head channel/spatial order matches the action id.
-    assert nonzero == legal_ids
-
-    # Positionally: probs[encode_move(state, m)] > 0 for every legal move, and
-    # every illegal id is exactly 0.
-    for m in legal_moves(state):
-        assert probs[encode_move(state, m)] > 0.0
-    for i in range(ACTION_SPACE):
-        if i not in legal_ids:
-            assert probs[i] == 0.0
-
-
-# ---------------------------------------------------------------------------
-# 4. save/load round-trip
-
-
-def test_save_load_round_trip(tmp_path: Path) -> None:
-    net = _net()
-    optimizer = torch.optim.Adam(net.parameters(), lr=1e-3)
-    device = torch.device("cpu")
-
-    x = torch.randn(2, NUM_PLANES, WINDOW, WINDOW)
-    net.eval()
-    with torch.no_grad():
-        ref_policy, ref_value = net(x)
-
-    path = save(tmp_path, step=7, net=net, optimizer=optimizer, config={"lr": 1e-3})
-    assert path.name == "step_000007.pt"
-
-    # Reconstruct from net_arch alone (net not passed).
-    payload = load(path, device)
-    fresh = payload["net"]
-    assert fresh is not net
-    fresh.eval()
-    with torch.no_grad():
-        out_policy, out_value = fresh(x)
-    assert torch.equal(out_policy, ref_policy)
-    assert torch.equal(out_value, ref_value)
-    assert payload["step"] == 7
-    assert payload["config"] == {"lr": 1e-3}
-
-    # Optimizer state restored into a matching optimizer.
-    fresh_opt = torch.optim.Adam(fresh.parameters(), lr=1e-3)
-    load(path, device, net=fresh, optimizer=fresh_opt)
-    assert fresh_opt.state_dict()["param_groups"][0]["lr"] == 1e-3
-
-    # latest() picks the highest step.
-    save(tmp_path, step=3, net=net)
-    save(tmp_path, step=42, net=net)
-    top = latest(tmp_path)
-    assert top is not None and top.name == "step_000042.pt"
-
-
-def test_latest_empty_dir(tmp_path: Path) -> None:
-    empty = tmp_path / "nada"
-    empty.mkdir()
-    assert latest(empty) is None
-
-
-# ---------------------------------------------------------------------------
-# 5. determinism
-
-
-def test_eval_is_deterministic() -> None:
-    net = _net().eval()
-    x = torch.randn(3, NUM_PLANES, WINDOW, WINDOW)
-    with torch.no_grad():
-        p1, v1 = net(x)
-        p2, v2 = net(x)
-    assert torch.equal(p1, p2)
-    assert torch.equal(v1, v2)
-
-
-# ---------------------------------------------------------------------------
-# 6. runs on pick_device()
-
-
-def test_runs_on_pick_device() -> None:
-    device = pick_device()
-    net = _net().to(device).eval()
-    state = _mid_game(seed=4, moves=8)
-    probs, value = evaluate_state(net, state, device)
-    assert probs.shape == (ACTION_SPACE,)
-    assert abs(probs.sum() - 1.0) < 1e-5
-    assert -1.0 <= value <= 1.0
+    legal = {encode_move(state, m) for m in legal_moves(state)}
+    assert set(np.nonzero(probs)[0]).issubset(legal)

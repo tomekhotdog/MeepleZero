@@ -1,135 +1,170 @@
-"""Residual policy/value CNN for the AlphaZero-style agent.
+"""Fully-convolutional residual policy/value CNN -- size-agnostic (iteration 3).
 
-The network reads the ``(NUM_PLANES, WINDOW, WINDOW)`` encoding produced by
-:mod:`carcassonne.nn.encode` and emits, per state:
+Reads the ``(NUM_PLANES, H, W)`` dynamic-crop encoding and emits, per state:
 
-* a **policy** over the whole action space -- one logit per action id, in exactly
-  the :mod:`carcassonne.nn.actions` layout ``((wy*B+wx)*4+rot)*14+a`` so that
-  ``policy_logits[..., i]`` is the logit for action id ``i``;
-* a **value** in ``[-1, 1]`` (tanh), from the *current player's* perspective.
+* **policy** -- one logit per flat action index, layout ``((gy*W+gx)*4+rot)*14+a``
+  (see :mod:`carcassonne.nn.actions`); shape ``(N, H*W*56)`` for whatever H, W
+  the input has.
+* **value** in ``[-1, 1]`` (tanh), current-player perspective, via a masked
+  global-average pool -- no Linear tied to a board size anywhere.
 
-Head/ActionIndexer alignment (the single most bug-prone thing here) is proven in
-``tests/nn/test_model.py`` -- see :func:`_policy_head_flatten` for the reshape.
+Normalisation is :class:`MaskedGroupNorm`: GroupNorm statistics over *valid*
+cells only, output re-zeroed on padding. Invariant (tested): a batch-padded
+forward pass equals the unpadded forward pass exactly on the real cells --
+padding cells stay 0 through every layer, so a 3x3 conv at a real border cell
+sees the same zeros as implicit zero-padding.
 """
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import torch
+import torch.nn.functional as F
 from numpy.typing import NDArray
 from torch import nn
 
 from carcassonne.core.engine import GameState
-from carcassonne.nn.actions import ACTION_SPACE, WINDOW
+from carcassonne.nn.actions import ACTIONS, ACTIONS_PER_CELL, ROTS
 from carcassonne.nn.encode import NUM_PLANES, encode_state
 
-_ROTS = 4
-_ACTIONS = 14
-_ACTIONS_PER_CELL = _ROTS * _ACTIONS  # 56 policy channels, encoding rot*14 + a
-_VALUE_CHANNELS = 4
-
-assert _ACTIONS_PER_CELL * WINDOW * WINDOW == ACTION_SPACE
+_VALUE_CHANNELS = 8
+_VALUE_HIDDEN = 32
+_DEFAULT_CHANNELS = 48
+_DEFAULT_N_BLOCKS = 4
 
 
 def _conv3x3(in_ch: int, out_ch: int) -> nn.Conv2d:
     return nn.Conv2d(in_ch, out_ch, kernel_size=3, padding=1, bias=False)
 
 
+def _gn_groups(channels: int) -> int:
+    return 8 if channels % 8 == 0 else math.gcd(8, channels)
+
+
+class MaskedGroupNorm(nn.Module):
+    """GroupNorm whose statistics ignore padding cells.
+
+    ``forward(x, cell_mask)``: with ``cell_mask=None`` this is exactly
+    ``F.group_norm`` (single-state inference, no padding). With a ``(N, 1, H, W)``
+    0/1 mask, mean/var are computed over valid cells only and the output is
+    multiplied by the mask -- keeping padded cells exactly 0 (the affine bias
+    would otherwise leak into real cells through the next conv).
+    """
+
+    def __init__(self, channels: int, eps: float = 1e-5) -> None:
+        super().__init__()
+        self.groups = _gn_groups(channels)
+        self.eps = eps
+        self.weight = nn.Parameter(torch.ones(channels))
+        self.bias = nn.Parameter(torch.zeros(channels))
+
+    def forward(self, x: torch.Tensor, cell_mask: torch.Tensor | None = None) -> torch.Tensor:
+        if cell_mask is None:
+            return F.group_norm(x, self.groups, self.weight, self.bias, self.eps)
+        n, c, h, w = x.shape
+        g = self.groups
+        xg = x.reshape(n, g, c // g, h, w)
+        mg = cell_mask.reshape(n, 1, 1, h, w)
+        count = mg.sum(dim=(2, 3, 4), keepdim=True) * (c // g)
+        mean = (xg * mg).sum(dim=(2, 3, 4), keepdim=True) / count
+        var = ((xg - mean) ** 2 * mg).sum(dim=(2, 3, 4), keepdim=True) / count
+        xg = (xg - mean) / torch.sqrt(var + self.eps)
+        out = xg.reshape(n, c, h, w)
+        out = out * self.weight.view(1, -1, 1, 1) + self.bias.view(1, -1, 1, 1)
+        return out * cell_mask
+
+
 class _ResBlock(nn.Module):
-    """[conv3x3+BN+ReLU, conv3x3+BN] + skip, then ReLU."""
+    """[conv3x3+MGN+ReLU, conv3x3+MGN] + skip, then ReLU. Mask-preserving."""
 
     def __init__(self, channels: int) -> None:
         super().__init__()
         self.conv1 = _conv3x3(channels, channels)
-        self.bn1 = nn.BatchNorm2d(channels)
+        self.gn1 = MaskedGroupNorm(channels)
         self.conv2 = _conv3x3(channels, channels)
-        self.bn2 = nn.BatchNorm2d(channels)
+        self.gn2 = MaskedGroupNorm(channels)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        out = torch.relu(self.bn1(self.conv1(x)))
-        out = self.bn2(self.conv2(out))
+    def forward(self, x: torch.Tensor, cell_mask: torch.Tensor | None) -> torch.Tensor:
+        out = torch.relu(self.gn1(self.conv1(x), cell_mask))
+        out = self.gn2(self.conv2(out), cell_mask)
         return torch.relu(out + x)
 
 
 def _policy_head_flatten(logits: torch.Tensor) -> torch.Tensor:
-    """``(N, 56, H, W)`` conv output -> ``(N, ACTION_SPACE)`` in ActionIndexer order.
+    """``(N, 56, H, W)`` conv output -> ``(N, H*W*56)`` in ActionIndexer order.
 
-    The 56 channels encode ``rot*14 + a`` and the spatial axes are ``(wy, wx)``
-    (matching ``encode``'s ``planes[c, wy, wx]``). The target flat index is
-    ``((wy*B+wx)*4+rot)*14+a``, i.e. axis order (slow->fast) ``wy, wx, rot, a``.
-
-    So: split the channel dim ``56 -> (rot=4, a=14)``, permute to
-    ``(N, wy, wx, rot, a)``, then flatten. Row-major flatten of that order is
-    exactly the action-id formula.
+    Channels encode ``rot*14 + a``; target flat order (slow->fast) is
+    ``gy, gx, rot, a`` -- split channels to (rot, a), permute, flatten.
     """
-    n = logits.shape[0]
-    # (N, 56, H, W) -> (N, rot, a, wy, wx)
-    logits = logits.reshape(n, _ROTS, _ACTIONS, WINDOW, WINDOW)
-    # -> (N, wy, wx, rot, a)
+    n, _, h, w = logits.shape
+    logits = logits.reshape(n, ROTS, ACTIONS, h, w)
     logits = logits.permute(0, 3, 4, 1, 2)
-    return logits.reshape(n, ACTION_SPACE)
+    return logits.reshape(n, h * w * ACTIONS_PER_CELL)
 
 
 class CarcassonneNet(nn.Module):
-    """Small residual CNN: shared trunk, policy head, value head.
+    """Size-agnostic residual CNN: shared trunk, per-cell policy head, pooled
+    value head.
 
-    ``forward(x, mask=None) -> (policy_logits, value)``:
+    ``forward(x, mask=None, cell_mask=None) -> (policy_logits, value)``:
 
-    * ``policy_logits`` -- ``(N, ACTION_SPACE)``. If ``mask`` (bool, same shape)
-      is given, logits at illegal actions (``mask`` False) are set to ``-inf``,
-      so a softmax over the row yields exactly 0 probability there.
-    * ``value`` -- ``(N,)`` in ``[-1, 1]`` (tanh), current-player perspective.
+    * ``x`` -- ``(N, NUM_PLANES, H, W)`` for any H, W.
+    * ``mask`` -- optional ``(N, H*W*56)`` bool; illegal logits -> ``-inf``.
+    * ``cell_mask`` -- optional ``(N, H, W)`` or ``(N, 1, H, W)`` 0/1 float;
+      REQUIRED whenever the batch is padded (learner), None for unpadded input.
     """
 
     def __init__(
         self,
         num_planes: int = NUM_PLANES,
-        channels: int = 64,
-        n_blocks: int = 5,
+        channels: int = _DEFAULT_CHANNELS,
+        n_blocks: int = _DEFAULT_N_BLOCKS,
     ) -> None:
         super().__init__()
         self.num_planes = num_planes
         self.channels = channels
         self.n_blocks = n_blocks
 
-        self.stem = nn.Sequential(
-            _conv3x3(num_planes, channels),
-            nn.BatchNorm2d(channels),
-            nn.ReLU(inplace=True),
-        )
+        self.stem_conv = _conv3x3(num_planes, channels)
+        self.stem_gn = MaskedGroupNorm(channels)
         self.blocks = nn.ModuleList(_ResBlock(channels) for _ in range(n_blocks))
 
-        # Policy head: conv1x1 -> BN, then reshape to ACTION_SPACE. No final ReLU:
-        # logits must be free to go negative so softmax can express sharp policies.
-        self.policy_conv = nn.Conv2d(channels, _ACTIONS_PER_CELL, kernel_size=1, bias=False)
-        self.policy_bn = nn.BatchNorm2d(_ACTIONS_PER_CELL)
+        # Policy head: plain 1x1 conv (bias on, no norm) -- logits per cell.
+        self.policy_conv = nn.Conv2d(channels, ACTIONS_PER_CELL, kernel_size=1)
 
-        # Value head: conv1x1 -> BN -> ReLU -> flatten -> Linear -> ReLU -> Linear -> tanh.
-        self.value_conv = nn.Conv2d(channels, _VALUE_CHANNELS, kernel_size=1, bias=False)
-        self.value_bn = nn.BatchNorm2d(_VALUE_CHANNELS)
-        self.value_fc1 = nn.Linear(_VALUE_CHANNELS * WINDOW * WINDOW, 64)
-        self.value_fc2 = nn.Linear(64, 1)
+        # Value head: 1x1 conv -> ReLU -> masked global-average pool -> MLP -> tanh.
+        self.value_conv = nn.Conv2d(channels, _VALUE_CHANNELS, kernel_size=1)
+        self.value_fc1 = nn.Linear(_VALUE_CHANNELS, _VALUE_HIDDEN)
+        self.value_fc2 = nn.Linear(_VALUE_HIDDEN, 1)
 
     def forward(
-        self, x: torch.Tensor, mask: torch.Tensor | None = None
+        self,
+        x: torch.Tensor,
+        mask: torch.Tensor | None = None,
+        cell_mask: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        x = self.stem(x)
-        for block in self.blocks:
-            x = block(x)
+        cm = None
+        if cell_mask is not None:
+            cm = cell_mask if cell_mask.dim() == 4 else cell_mask.unsqueeze(1)
 
-        p = self.policy_bn(self.policy_conv(x))
-        policy_logits = _policy_head_flatten(p)
+        h = torch.relu(self.stem_gn(self.stem_conv(x), cm))
+        for block in self.blocks:
+            h = block(h, cm)
+
+        policy_logits = _policy_head_flatten(self.policy_conv(h))
         if mask is not None:
-            # Illegal actions -> -inf so softmax gives them exactly 0. NOTE for the
-            # learner (T19): computing cross-entropy directly on these masked logits
-            # risks 0 * -inf = NaN — restrict the policy loss to legal actions / the
-            # visit-target support, do not sum over -inf entries.
+            # Illegal (and padded) actions -> -inf; the learner's cross-entropy
+            # must stay on the target's support (0 * -inf = NaN otherwise).
             policy_logits = policy_logits.masked_fill(~mask, float("-inf"))
 
-        v = torch.relu(self.value_bn(self.value_conv(x)))
-        v = v.flatten(start_dim=1)
-        v = torch.relu(self.value_fc1(v))
-        value = torch.tanh(self.value_fc2(v)).squeeze(-1)
+        v = torch.relu(self.value_conv(h))
+        if cm is None:
+            pooled = v.mean(dim=(2, 3))
+        else:
+            pooled = (v * cm).sum(dim=(2, 3)) / cm.sum(dim=(2, 3))
+        value = torch.tanh(self.value_fc2(torch.relu(self.value_fc1(pooled)))).squeeze(-1)
 
         return policy_logits, value
 
@@ -144,17 +179,15 @@ def evaluate_state(
 ) -> tuple[NDArray[np.float32], float]:
     """Encode one ``state``, run the net masked to legal moves, return (probs, value).
 
-    ``probs`` is a ``(ACTION_SPACE,)`` float32 array that sums to 1 over legal
-    actions and is exactly 0 on illegal ones (the masked ``-inf`` logits softmax
-    to zero). ``value`` is the scalar tanh estimate for the current player. This
-    is the bridge MCTS/agents call; the model itself stays pure tensors.
+    ``probs`` has shape ``(Crop.of(state).n_actions,)``, sums to 1 over legal
+    moves, exactly 0 elsewhere. Unpadded single state -> ``cell_mask=None``
+    (fast ``F.group_norm`` path). The bridge MCTS calls; the model stays tensors.
     """
     from carcassonne.nn.actions import legal_mask  # local: avoid import cycle at module load
 
     planes = encode_state(state)
     x = torch.from_numpy(planes).unsqueeze(0).to(device)
-    mask_np = legal_mask(state)
-    mask = torch.from_numpy(mask_np).unsqueeze(0).to(device)
+    mask = torch.from_numpy(legal_mask(state)).unsqueeze(0).to(device)
 
     was_training = net.training
     net.eval()
