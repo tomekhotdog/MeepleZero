@@ -163,7 +163,10 @@ def legal_mask(
     """
     c = crop or Crop.of(state)
     ph, pw = pad_hw or (c.h, c.w)
-    assert ph >= c.h and pw >= c.w, f"padding {(ph, pw)} smaller than crop {(c.h, c.w)}"
+    if not (ph >= c.h and pw >= c.w):
+        # A stride narrower than the crop silently aliases distinct cells onto
+        # the same flat index — fail loud, never silent (and never stripped by -O).
+        raise RulesError(f"padding {(ph, pw)} smaller than crop {(c.h, c.w)}")
     mask = np.zeros(ph * pw * ACTIONS_PER_CELL, dtype=np.bool_)
     for move in legal_moves(state):
         mask[flat_index(c, move_key(move), stride_w=pw)] = True

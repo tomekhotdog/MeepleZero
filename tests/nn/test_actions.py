@@ -97,3 +97,22 @@ def test_flat_index_raises_outside_crop() -> None:
     state = new_game(0, GameConfig())
     with pytest.raises(RulesError):
         flat_index(Crop.of(state), (99, 99, 0, 0))
+
+
+def test_decode_move_raises_out_of_range() -> None:
+    state = new_game(0, GameConfig())
+    for idx in (-1, Crop.of(state).n_actions, 10**9):
+        with pytest.raises(RulesError):
+            decode_move(state, idx)
+
+
+def test_legal_mask_rejects_padding_smaller_than_crop() -> None:
+    state = new_game(0, GameConfig())  # crop is 3x3
+    with pytest.raises(RulesError):
+        legal_mask(state, pad_hw=(2, 2))
+
+
+def test_rotate_key_negative_k_is_inverse() -> None:
+    k = move_key(Move(Pos(3, -2), Rotation.R90, PlaceMeeple(2, MeepleKind.ABBOT)))
+    assert rotate_key(rotate_key(k, 1), -1) == k
+    assert rotate_key(k, -1) == rotate_key(k, 3)
