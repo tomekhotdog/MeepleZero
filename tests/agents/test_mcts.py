@@ -15,12 +15,21 @@ import torch
 
 from carcassonne.agents import MctsAgent, MctsConfig, RandomAgent, TurnContext
 from carcassonne.agents.mcts import _terminal_value
-from carcassonne.core import GameState, Move, Pos, Rotation, is_terminal, legal_moves, new_game
+from carcassonne.core import (
+    GameConfig,
+    GameState,
+    Move,
+    Pos,
+    Rotation,
+    RulesError,
+    is_terminal,
+    legal_moves,
+    new_game,
+)
 from carcassonne.core.features import FeatureIndex, Meeple, NodeId
 from carcassonne.core.state import Board, PlacedTile
 from carcassonne.core.types import MeepleKind
 from carcassonne.game.arena import run_match
-from carcassonne.nn.actions import legal_mask
 from carcassonne.nn.model import CarcassonneNet
 
 SEED = 0
@@ -201,41 +210,28 @@ def test_self_play_temperature_explores_early_moves() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Wide-board robustness: when the board already fills the 31-cell window, a legal
-# placement one cell past either end maps *outside* the window. legal_mask must
-# mask (not crash on) those, and MCTS must prune them and still search. This is
-# the bug MCTS surfaced -- it explores far wider board shapes than a normal game
-# reaches. A row of 31 all-field "B" monastery tiles fills the window exactly, so
-# every tile still encodes while the placements extending it are out of window.
+# 2-player guard: MCTS backup is negamax (value negated each ply), which is only
+# correct for exactly two alternating players. N-player states must be rejected
+# loudly, not searched wrongly.
 
 
-def _wide_board_state() -> GameState:
-    board, idx = _build(
-        (Pos(0, 0), "D", Rotation.R0),
-        *[(Pos(i, -1), "B", Rotation.R0) for i in range(31)],  # fills the window (x: 0..30)
-    )
-    xs = [p.x for p in board]
-    assert max(xs) - min(xs) + 1 == 31  # exactly window-width: tiles fit, extensions don't
-    return _state(board, idx, current_tile="B")
+def test_mcts_rejects_non_two_player_state() -> None:
+    agent = MctsAgent(_net(), DEVICE, MctsConfig(sims=1))
+    with pytest.raises(RulesError, match="2-player"):
+        agent.choose(new_game(0, GameConfig(num_players=3)), TurnContext(rng=random.Random(0)))
 
 
-def test_legal_mask_prunes_moves_outside_the_window() -> None:
-    state = _wide_board_state()
-    n_legal = len(legal_moves(state))
-    mask = legal_mask(state)  # must not raise
-    assert 0 < int(mask.sum()) < n_legal  # some legal moves fall outside the window
-
-
-def test_mcts_searches_a_wide_board_without_crashing() -> None:
-    state = _wide_board_state()
-    agent = MctsAgent(_net(), DEVICE, MctsConfig(sims=16))
-    move, _ = agent.choose(state, TurnContext(rng=random.Random(0)))
-    assert move in legal_moves(state)
+def test_choose_with_policy_rejects_non_two_player_state() -> None:
+    agent = MctsAgent(_net(), DEVICE, MctsConfig(sims=1))
+    with pytest.raises(RulesError, match="2-player"):
+        agent.choose_with_policy(
+            new_game(0, GameConfig(num_players=3)), TurnContext(rng=random.Random(0))
+        )
 
 
 # ---------------------------------------------------------------------------
 # End-to-end: MctsAgent plays complete, legal games against RandomAgent without
-# crashing (also regression-covers the wide-board path in real play).
+# crashing.
 #
 # NOTE on strength: the plan hoped an *untrained*-net search would beat random.
 # It does not. Measured over 10 seeded games (sims=64) the untrained MctsAgent

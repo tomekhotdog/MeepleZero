@@ -47,7 +47,7 @@ from carcassonne.core import (
 )
 from carcassonne.game.agent import TurnContext
 from carcassonne.game.serde import Annot
-from carcassonne.nn.actions import encode_move
+from carcassonne.nn.actions import Crop, flat_index, move_key
 from carcassonne.nn.model import CarcassonneNet, evaluate_state
 
 _TOP_K = 8
@@ -92,6 +92,7 @@ def _terminal_value(state: GameState) -> float:
     """Game outcome from the perspective of the player to move at this terminal
     state: +1 win, -1 loss, 0 draw. See the module docstring on why this is
     correct despite no one actually moving at a terminal node."""
+    # 2-tuple unpack is safe: choose/choose_with_policy guard len(scores) == 2.
     s0, s1 = final_scores(state)
     if s0 == s1:
         return 0.0
@@ -125,6 +126,11 @@ class MctsAgent:
     # -- Agent protocol -----------------------------------------------------
 
     def choose(self, state: GameState, ctx: TurnContext) -> tuple[Move, Annot | None]:
+        if len(state.scores) != 2:
+            raise RulesError(
+                f"MctsAgent is 2-player only (negamax backup); "
+                f"got a {len(state.scores)}-player state"
+            )
         start = time.perf_counter()
         rng = np.random.default_rng(ctx.rng.getrandbits(64))
         root = self._search(state, rng, add_noise=self._self_play)
@@ -147,6 +153,11 @@ class MctsAgent:
         self-play game pays for exactly one search per move (not one for the move
         and another for the target). Honours ``self_play`` (root Dirichlet noise +
         temperature sampling) identically to :meth:`choose`; always annotates."""
+        if len(state.scores) != 2:
+            raise RulesError(
+                f"MctsAgent is 2-player only (negamax backup); "
+                f"got a {len(state.scores)}-player state"
+            )
         start = time.perf_counter()
         rng = np.random.default_rng(ctx.rng.getrandbits(64))
         root = self._search(state, rng, add_noise=self._self_play)
@@ -199,22 +210,11 @@ class MctsAgent:
                 q=empty_f.copy(),
             )
         probs, value = evaluate_state(self._net, state, self._device)
-        # Keep only moves the encoder can represent. On boards wider than the fixed
-        # window a few legal placements fall outside it (the net has no slot for
-        # them); we prune them from the search, exactly as legal_mask masks them.
-        moves_list: list[Move] = []
-        prior_list: list[float] = []
-        for m in legal_moves(state):
-            try:
-                idx = encode_move(state, m)
-            except RulesError:
-                continue
-            moves_list.append(m)
-            prior_list.append(float(probs[idx]))
-        if not moves_list:  # pathological: no legal move fits the window
-            raise RulesError("no legal move fits the encoder window")
-        moves = tuple(moves_list)
-        prior = np.array(prior_list, dtype=np.float64)
+        moves = legal_moves(state)
+        crop = Crop.of(state)  # hoisted once; encode_move would recompute it per move
+        prior = np.array(
+            [float(probs[flat_index(crop, move_key(m))]) for m in moves], dtype=np.float64
+        )
         total = prior.sum()
         # probs already sum to 1 over legal moves; renormalise for numerical safety,
         # falling back to uniform only in the degenerate all-zero case.
