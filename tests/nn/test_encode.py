@@ -4,154 +4,33 @@ import dataclasses
 import random
 
 import numpy as np
-from numpy.typing import NDArray
+import pytest
 
-from carcassonne.core import apply, is_terminal, legal_moves, new_game
+from carcassonne.core import GameConfig, RulesError, apply, is_terminal, legal_moves, new_game
 from carcassonne.core.engine import GameState
 from carcassonne.core.features import FeatureIndex, Meeple
 from carcassonne.core.state import Board, PlacedTile
-from carcassonne.core.types import Move, PlaceMeeple, Pos, Rotation
-from carcassonne.nn.actions import WINDOW, window_origin
-from carcassonne.nn.encode import NUM_PLANES, PLANES, encode_state
-
-FloatArray = NDArray[np.float32]
-
-# ---------------------------------------------------------------------------
-# Basic shape / manifest
-
-
-def test_shape_and_manifest() -> None:
-    state = new_game(0)
-    planes = encode_state(state)
-    assert planes.shape == (NUM_PLANES, WINDOW, WINDOW)
-    assert planes.dtype == np.float32
-    assert NUM_PLANES == 62
-    assert len(PLANES) == 62
-    assert len(set(PLANES)) == 62  # no duplicate names
-
-
-def test_occupied_and_current_tile_one_hot() -> None:
-    state = new_game(1)
-    for _ in range(10):
-        planes = encode_state(state)
-        assert int(planes[PLANES.index("occupied")].sum()) == len(state.board)
-        # current-tile planes are broadcast constants: exactly one is set (all-ones).
-        assert _n_current_tile_planes_set(planes) == 1
-        state = apply(state, legal_moves(state)[0])
-
-    terminal = _play_to_end(2)
-    assert is_terminal(terminal)
-    planes = encode_state(terminal)
-    assert _n_current_tile_planes_set(planes) == 0  # no current tile when terminal
-
-
-def test_perspective_swaps_on_apply() -> None:
-    state = _first_state_with_unequal_scores(seed=3)
-    me = state.current_player
-    planes = encode_state(state)
-    assert planes[PLANES.index("s_my_score")][0, 0] == np.float32(state.scores[me] / 50.0)
-    assert planes[PLANES.index("s_opp_score")][0, 0] == np.float32(state.scores[1 - me] / 50.0)
-
-    nxt = apply(state, legal_moves(state)[0])
-    assert nxt.current_player == 1 - me  # perspective flips
-    planes2 = encode_state(nxt)
-    assert planes2[PLANES.index("s_my_score")][0, 0] == np.float32(
-        nxt.scores[nxt.current_player] / 50.0
-    )
-    assert planes2[PLANES.index("s_opp_score")][0, 0] == np.float32(
-        nxt.scores[1 - nxt.current_player] / 50.0
-    )
-
-
-# ---------------------------------------------------------------------------
-# D4 equivariance: a 90-degree clockwise board rotation == np.rot90 of the
-# spatial planes, with the four edge sides cyclically permuted (N<-W, E<-N,
-# S<-E, W<-S). Verified on a genuine mid-game state carrying tiles, edges,
-# meeples and completed features.
-
-
-def _rot_pos(p: Pos) -> Pos:
-    """World 90-degree clockwise rotation: (x, y) -> (y, -x)."""
-    return Pos(p.y, -p.x)
-
-
-def _rot_rotation(r: Rotation) -> Rotation:
-    return Rotation((int(r) + 1) % 4)
-
-
-def rotate_state_90(state: GameState) -> GameState:
-    """A genuine 90-degree-clockwise rotation of the whole game state.
-
-    Rebuilds the feature index from the rotated board (union-find is order
-    independent), then re-places every meeple on its rotated node, so the result
-    is a fully valid GameState equivalent to the original under a board rotation.
-    """
-    rotated = {_rot_pos(p): PlacedTile(pt.type_id, _rot_rotation(pt.rotation))
-               for p, pt in state.board.items()}
-    board: Board = {}
-    idx = FeatureIndex.empty()
-    for pos in sorted(rotated):
-        board[pos] = rotated[pos]
-        idx = idx.with_tile(board, pos)
-    for d in state.features.data.values():
-        for m in d.meeples:
-            mpos, feat = m.node
-            node = (_rot_pos(mpos), feat)
-            idx = idx.with_meeple(node, Meeple(m.player, m.kind, node))
-    def rot_node(n: tuple[Pos, int] | None) -> tuple[Pos, int] | None:
-        return (_rot_pos(n[0]), n[1]) if n is not None else None
-
-    abbot_at = (rot_node(state.abbot_at[0]), rot_node(state.abbot_at[1]))
-    return dataclasses.replace(state, board=board, features=idx, abbot_at=abbot_at)
-
-
-def _crop(planes: FloatArray, state: GameState) -> FloatArray:
-    """Crop spatial planes to the occupied bounding box (removes centring)."""
-    ox, oy = window_origin(state)
-    xs = [p.x for p in state.board]
-    ys = [p.y for p in state.board]
-    x0, x1 = min(xs) - ox, max(xs) - ox
-    y0, y1 = min(ys) - oy, max(ys) - oy
-    return planes[:, y0 : y1 + 1, x0 : x1 + 1]
-
-
-def test_d4_rotation_equivariance() -> None:
-    state = _meeple_biased_game(seed=5, moves=22)
-    # Sanity: the state we test is non-trivial (real content to transform).
-    e = encode_state(state)
-    assert int(e[PLANES.index("occupied")].sum()) == len(state.board)
-    meeple_total = int(
-        e[PLANES.index("meeple_me")].sum() + e[PLANES.index("meeple_opp")].sum()
-    )
-    assert meeple_total > 0  # meeple planes are genuinely exercised
-
-    er = encode_state(rotate_state_90(state))
-    co = _crop(e, state)
-    cr = _crop(er, rotate_state_90(state))
-
-    prev_side = {"N": "W", "E": "N", "S": "E", "W": "S"}
-    edge_planes = set()
-    for side in ("N", "E", "S", "W"):
-        for kind in ("city", "road", "field"):
-            i = PLANES.index(f"edge_{side}_{kind}")
-            src = PLANES.index(f"edge_{prev_side[side]}_{kind}")
-            edge_planes.add(i)
-            assert np.array_equal(cr[i], np.rot90(co[src], 1)), f"edge {side}/{kind}"
-
-    # Every other spatial plane transforms by a plain np.rot90 (no side perm).
-    for i in range(24):
-        if i in edge_planes:
-            continue
-        assert np.array_equal(cr[i], np.rot90(co[i], 1)), PLANES[i]
-
+from carcassonne.core.types import PlaceMeeple, Pos, Rotation
+from carcassonne.nn.actions import Crop
+from carcassonne.nn.encode import (
+    _CUR0,
+    _EDGE0,
+    NUM_PLANES,
+    PLANES,
+    encode_state,
+    valid_mask,
+)
 
 # ---------------------------------------------------------------------------
 # helpers
 
 
-def _n_current_tile_planes_set(planes: FloatArray) -> int:
-    tile_idx = [PLANES.index(name) for name in PLANES if name.startswith("tile_")]
-    return int(sum(bool(planes[i].any()) for i in tile_idx))
+def _mid_state(seed: int = 7, n_moves: int = 12) -> GameState:
+    rng = random.Random(seed)
+    state = new_game(seed, GameConfig())
+    for _ in range(n_moves):
+        state = apply(state, rng.choice(legal_moves(state)))
+    return state
 
 
 def _play_to_end(seed: int) -> GameState:
@@ -180,38 +59,211 @@ def _meeple_biased_game(seed: int, moves: int) -> GameState:
         if is_terminal(state):
             break
         legal = legal_moves(state)
-        preferred = [m for m in legal if _places_meeple(m)]
+        preferred = [m for m in legal if isinstance(m.action, PlaceMeeple)]
         state = apply(state, rng.choice(preferred or list(legal)))
     return state
 
 
-def _places_meeple(move: Move) -> bool:
-    return isinstance(move.action, PlaceMeeple)
+# ---------------------------------------------------------------------------
+# Rotation machinery.
+# local copy: learner.py is red-window-broken until M12; M12 must re-point this
+# import back to `from carcassonne.training.learner import rotate_state_90`.
 
 
-def test_wide_board_is_cropped_not_raised() -> None:
-    # A board spanning more than WINDOW tiles in one axis must encode as a crop,
-    # never raise (a long straight game is legal and must not crash self-play).
-    board: Board = {Pos(x, 0): PlacedTile("U", Rotation.R90) for x in range(-20, WINDOW + 5)}
-    state = GameState(
-        board=board,
-        features=FeatureIndex.empty(),
-        deck=(),
-        current_tile=None,
-        current_player=0,
-        scores=(0, 0),
-        meeples=(7, 7),
-        abbots=(True, True),
-        abbot_at=(None, None),
-        discarded=(),
-        last_events=(),
-        turn=len(board),
+def _rot_pos(p: Pos) -> Pos:
+    """World 90-degree clockwise rotation of a cell: (x, y) -> (y, -x)."""
+    return Pos(p.y, -p.x)
+
+
+def _rot_rotation(r: Rotation) -> Rotation:
+    return Rotation((int(r) + 1) % 4)
+
+
+def rotate_state_90(state: GameState) -> GameState:
+    """A genuine 90-degree-clockwise rotation of the whole game state.
+
+    Rebuilds the feature index from the rotated board (union-find is order
+    independent), re-places every meeple on its rotated node, and rotates the
+    abbot bookkeeping, so the result is a fully valid ``GameState`` equivalent to
+    the original under a board rotation.
+    """
+    rotated = {
+        _rot_pos(p): PlacedTile(pt.type_id, _rot_rotation(pt.rotation))
+        for p, pt in state.board.items()
+    }
+    board: Board = {}
+    idx = FeatureIndex.empty()
+    for pos in sorted(rotated):
+        board[pos] = rotated[pos]
+        idx = idx.with_tile(board, pos)
+    for d in state.features.data.values():
+        for m in d.meeples:
+            mpos, feat = m.node
+            node = (_rot_pos(mpos), feat)
+            idx = idx.with_meeple(node, Meeple(m.player, m.kind, node))
+
+    def rot_node(n: tuple[Pos, int] | None) -> tuple[Pos, int] | None:
+        return (_rot_pos(n[0]), n[1]) if n is not None else None
+
+    abbot_at = tuple(rot_node(n) for n in state.abbot_at)
+    return dataclasses.replace(state, board=board, features=idx, abbot_at=abbot_at)
+
+
+# ---------------------------------------------------------------------------
+# Shapes, manifest, padding
+
+
+def test_shapes_track_crop() -> None:
+    state = new_game(0, GameConfig())
+    crop = Crop.of(state)
+    planes = encode_state(state)
+    assert planes.shape == (NUM_PLANES, crop.h, crop.w) == (52, 3, 3)
+    assert planes.dtype == np.float32
+    assert len(PLANES) == NUM_PLANES == 52
+    assert len(set(PLANES)) == 52  # no duplicate names
+    mid = _mid_state()
+    c2 = Crop.of(mid)
+    assert encode_state(mid).shape == (52, c2.h, c2.w)
+
+
+def test_padded_encoding_zero_outside_crop() -> None:
+    state = _mid_state()
+    crop = Crop.of(state)
+    ph, pw = crop.h + 3, crop.w + 2
+    planes = encode_state(state, pad_hw=(ph, pw))
+    assert planes.shape == (NUM_PLANES, ph, pw)
+    assert np.array_equal(planes[:, : crop.h, : crop.w], encode_state(state))
+    assert not planes[:, crop.h :, :].any()
+    assert not planes[:, :, crop.w :].any()
+    vm = valid_mask(crop, pad_hw=(ph, pw))
+    assert vm.shape == (ph, pw)
+    assert vm[: crop.h, : crop.w].all() and vm.sum() == crop.h * crop.w
+
+
+def test_broadcast_planes_cover_exactly_the_crop() -> None:
+    state = _mid_state()
+    planes = encode_state(state)
+    turn_plane = planes[PLANES.index("s_turn")]
+    assert (turn_plane == np.float32(state.turn / 72.0)).all()  # constant across the whole crop
+
+
+# ---------------------------------------------------------------------------
+# Content: perspective, current-tile planes, FeaturePlanes
+
+
+def test_perspective_swaps_on_apply() -> None:
+    state = _first_state_with_unequal_scores(seed=3)
+    me = state.current_player
+    planes = encode_state(state)
+    assert planes[PLANES.index("s_my_score")][0, 0] == np.float32(state.scores[me] / 50.0)
+    assert planes[PLANES.index("s_opp_score")][0, 0] == np.float32(state.scores[1 - me] / 50.0)
+
+    nxt = apply(state, legal_moves(state)[0])
+    assert nxt.current_player == 1 - me  # perspective flips
+    planes2 = encode_state(nxt)
+    assert planes2[PLANES.index("s_my_score")][0, 0] == np.float32(
+        nxt.scores[nxt.current_player] / 50.0
     )
-    board_span = max(p.x for p in board) - min(p.x for p in board) + 1
-    assert board_span > WINDOW  # precondition: genuinely wider than the window
+    assert planes2[PLANES.index("s_opp_score")][0, 0] == np.float32(
+        nxt.scores[1 - nxt.current_player] / 50.0
+    )
 
-    planes = encode_state(state)  # must not raise
-    assert planes.shape == (NUM_PLANES, WINDOW, WINDOW)
-    occupied = int(planes[PLANES.index("occupied")].sum())
-    assert occupied == WINDOW  # exactly the in-crop row of tiles, far tiles omitted
-    assert occupied < len(board)  # some tiles were genuinely cropped out
+
+def test_current_tile_planes_broadcast_structural_edges() -> None:
+    state = new_game(1)
+    for _ in range(6):
+        planes = encode_state(state)
+        # Per world side exactly one of {city, road, field} is set, all-ones.
+        cur_edges = planes[_CUR0 : _CUR0 + 12]
+        for si in range(4):
+            side = cur_edges[si * 3 : si * 3 + 3]
+            assert (side.sum(axis=0) == 1.0).all(), f"side {si} not one-hot"
+        state = apply(state, legal_moves(state)[0])
+
+    terminal = _play_to_end(2)
+    assert is_terminal(terminal)
+    planes = encode_state(terminal)
+    assert not planes[_CUR0 : _CUR0 + 15].any()  # no current tile when terminal
+
+
+def test_featureplanes_report_connected_feature() -> None:
+    """Property: a cell has fp_city_size > 0 iff it is occupied by a tile with a
+    city edge (every city feature touches >= 1 edge and has size >= 1)."""
+    mid = _mid_state()
+    planes = encode_state(mid)
+    occ = planes[PLANES.index("occupied")].astype(bool)
+    fp_size = planes[PLANES.index("fp_city_size")]
+    city_edge = planes[_EDGE0 : _EDGE0 + 12 : 3].sum(axis=0) > 0  # any city edge
+    assert ((fp_size > 0) == (occ & city_edge)).all()
+
+
+def test_featureplanes_meeples_are_perspective_correct() -> None:
+    state = _meeple_biased_game(seed=5, moves=22)
+    me = state.current_player
+    planes = encode_state(state)
+    fp_mine = planes[PLANES.index("fp_city_mine")] + planes[PLANES.index("fp_road_mine")]
+    fp_theirs = planes[PLANES.index("fp_city_theirs")] + planes[PLANES.index("fp_road_theirs")]
+    my_on_board = sum(
+        1
+        for d in state.features.data.values()
+        for m in d.meeples
+        if m.player == me and d.kind.value in ("city", "road")
+    )
+    opp_on_board = sum(
+        1
+        for d in state.features.data.values()
+        for m in d.meeples
+        if m.player != me and d.kind.value in ("city", "road")
+    )
+    assert (fp_mine.sum() > 0) == (my_on_board > 0)
+    assert (fp_theirs.sum() > 0) == (opp_on_board > 0)
+    assert my_on_board + opp_on_board > 0  # the planes are genuinely exercised
+
+
+# ---------------------------------------------------------------------------
+# D4 equivariance: a genuine 90-degree board rotation == np.rot90 of the
+# planes, with the 12 board-edge planes side-permuted (N<-W, E<-N, S<-E, W<-S).
+# Current-tile planes and scalars are broadcast constants, so np.rot90 leaves
+# them unchanged -- correctly so: the tile in hand does not rotate with the
+# board, and scalars are rotation-invariant.
+
+
+def test_d4_rotation_equivariance() -> None:
+    state = _meeple_biased_game(seed=5, moves=22)
+    planes = encode_state(state)
+    # Sanity: the state we test is non-trivial (real content to transform).
+    assert int(planes[PLANES.index("occupied")].sum()) == len(state.board)
+    meeple_total = int(
+        planes[PLANES.index("meeple_me")].sum() + planes[PLANES.index("meeple_opp")].sum()
+    )
+    assert meeple_total > 0  # meeple planes are genuinely exercised
+
+    rplanes = encode_state(rotate_state_90(state))
+    # World (x,y)->(y,-x) with crop re-anchoring maps grid cell (gy, gx) to
+    # (gy', gx') = ((w-1) - gx, gy), which is exactly np.rot90 with k=+1 on the
+    # (gy, gx) axes: rot90(A, 1)[i, j] == A[j, (w-1) - i].
+    expected = np.rot90(planes, k=1, axes=(1, 2)).copy()
+    # Permute the 12 edge planes: new world side N was old W, E was N, S was E, W was S.
+    perm = [3, 0, 1, 2]  # index by new side -> old side (N,E,S,W = 0,1,2,3)
+    edges = expected[_EDGE0 : _EDGE0 + 12].copy()
+    for new_s in range(4):
+        expected[_EDGE0 + new_s * 3 : _EDGE0 + new_s * 3 + 3] = edges[
+            perm[new_s] * 3 : perm[new_s] * 3 + 3
+        ]
+    assert np.allclose(rplanes, expected)
+
+
+# ---------------------------------------------------------------------------
+# Guards
+
+
+def test_encode_rejects_non_two_player_state() -> None:
+    with pytest.raises(RulesError, match="2-player"):
+        encode_state(new_game(0, GameConfig(num_players=3)))
+
+
+def test_encode_rejects_padding_smaller_than_crop() -> None:
+    state = _mid_state()
+    crop = Crop.of(state)
+    with pytest.raises(AssertionError):
+        encode_state(state, pad_hw=(crop.h - 1, crop.w))

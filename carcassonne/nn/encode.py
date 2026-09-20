@@ -1,29 +1,29 @@
-"""``GameState`` -> ``float32`` planes for the residual CNN.
+"""``GameState`` -> ``float32`` planes over the dynamic :class:`Crop`.
 
-Every plane is a ``WINDOW x WINDOW`` grid indexed ``planes[c, wy, wx]`` (axis 1 is
-window-y, axis 2 is window-x), so a 90-degree board rotation corresponds to
-:func:`numpy.rot90` on the spatial axes (with the four edge sides cyclically
-permuted). The encoding is from the *current player's* perspective: "me" is
-``state.current_player``, "opp" the other player.
+Output shape is ``(NUM_PLANES, H, W)`` where ``H x W`` is the per-state crop
+(or ``pad_hw`` when the learner pads a batch; padding rows/cols are all-zero,
+including broadcast planes -- the model relies on that for its padded==unpadded
+invariant). Indexed ``planes[c, gy, gx]``. Perspective: "me" is
+``state.current_player``, "opp" the other seat -- the encoding is strictly
+2-player (me/opp planes); :func:`encode_state` raises :class:`RulesError` on
+any other player count.
 
-Plane layout (see :data:`PLANES` for the exact names, in order):
+Layout (52 planes; see PLANES for names in order):
 
-Spatial (24), painted per occupied window cell:
-  * ``occupied`` (1)
-  * edge-kind one-hot per world side N,E,S,W x {city, road, field} (12)
-  * per-feature-kind presence on the tile: city, road, monastery, garden (4)
-  * ``shield`` present on the tile (1)
-  * ``completed``: the cell's tile carries a completed city/road feature (1)
-  * meeple owner one-hot: me, opp (2)
-  * abbot owner one-hot: me, opp (2)
-  * ``monfill``: for monastery/garden cells, occupied-8-neighbours / 8 (1)
+Spatial (21): occupied; 12 edge-kind one-hots (world side x {city,road,field});
+monastery/garden presence; shield; meeple/abbot owner (me/opp); monfill.
 
-Broadcast scalar (38), constant across the grid:
-  * my/opp score /50, my/opp meeples /7, my/opp abbot-in-supply (0/1),
-    deck-remaining /71, turn /72 (8)
-  * current-tile one-hot over the 30 tile-type ids, sorted (30)
+FeaturePlanes (8): per-cell max over the {city, road} features touching the
+tile, from the engine's FeatureIndex: normalised size, normalised open-edge
+count, my/opp meeple count. Hands the net long-range connectivity that convs
+cannot infer across snaky features. (Subsumes the old ``completed`` plane:
+completed <=> open == 0.)
 
-Total channels ``NUM_PLANES == 62``.
+Current tile (15, broadcast over the crop): the drawn tile's R0 edge kinds
+(12) + monastery/garden/shield flags -- structural properties, not a tile-ID
+one-hot, so structurally identical tiles share representation.
+
+Scalars (8, broadcast): scores/50, meeples/7, abbot flags, deck/71, turn/72.
 """
 
 from __future__ import annotations
@@ -32,21 +32,28 @@ import numpy as np
 from numpy.typing import NDArray
 
 from carcassonne.core.engine import GameState, neighbours8
-from carcassonne.core.tiles import TILE_TYPES, world_edge
-from carcassonne.core.types import EdgeKind, FeatureKind, MeepleKind, Side
-from carcassonne.nn.actions import WINDOW, window_origin
+from carcassonne.core.tiles import TILE_TYPES, derived_edges, world_edge
+from carcassonne.core.types import EdgeKind, FeatureKind, MeepleKind, RulesError, Side
+from carcassonne.nn.actions import Crop
 
 _SIDES = (Side.N, Side.E, Side.S, Side.W)
 _EDGE_KINDS = (EdgeKind.CITY, EdgeKind.ROAD, EdgeKind.FIELD)
-_FEATURE_KINDS = (FeatureKind.CITY, FeatureKind.ROAD, FeatureKind.MONASTERY, FeatureKind.GARDEN)
-_TILE_IDS: tuple[str, ...] = tuple(sorted(TILE_TYPES))
+_FP_KINDS = (FeatureKind.CITY, FeatureKind.ROAD)
 
 _SPATIAL_PLANES: list[str] = (
     ["occupied"]
     + [f"edge_{s.name}_{k.value}" for s in _SIDES for k in _EDGE_KINDS]
-    + [f"feat_{k.value}" for k in _FEATURE_KINDS]
-    + ["shield", "completed", "meeple_me", "meeple_opp", "abbot_me", "abbot_opp", "monfill"]
+    + ["feat_monastery", "feat_garden", "shield"]
+    + ["meeple_me", "meeple_opp", "abbot_me", "abbot_opp", "monfill"]
 )
+_FP_PLANES: list[str] = [
+    f"fp_{k.value}_{q}" for k in _FP_KINDS for q in ("size", "open", "mine", "theirs")
+]
+_CUR_PLANES: list[str] = [f"cur_edge_{s.name}_{k.value}" for s in _SIDES for k in _EDGE_KINDS] + [
+    "cur_monastery",
+    "cur_garden",
+    "cur_shield",
+]
 _SCALAR_PLANES: list[str] = [
     "s_my_score",
     "s_opp_score",
@@ -56,95 +63,136 @@ _SCALAR_PLANES: list[str] = [
     "s_opp_abbot",
     "s_deck_remaining",
     "s_turn",
-] + [f"tile_{tid}" for tid in _TILE_IDS]
+]
 
-PLANES: list[str] = _SPATIAL_PLANES + _SCALAR_PLANES
+PLANES: list[str] = _SPATIAL_PLANES + _FP_PLANES + _CUR_PLANES + _SCALAR_PLANES
 NUM_PLANES = len(PLANES)
 
-assert len(_SPATIAL_PLANES) == 24, len(_SPATIAL_PLANES)
-assert len(_SCALAR_PLANES) == 38, len(_SCALAR_PLANES)
-assert NUM_PLANES == 62, NUM_PLANES
+assert len(_SPATIAL_PLANES) == 21, len(_SPATIAL_PLANES)
+assert len(_FP_PLANES) == 8 and len(_CUR_PLANES) == 15, (len(_FP_PLANES), len(_CUR_PLANES))
+assert NUM_PLANES == 52, NUM_PLANES
 
 # Fixed plane offsets (kept in sync with PLANES by the asserts above).
 _OCC = 0
 _EDGE0 = 1  # 12 planes: side * 3 + kind
-_FEAT0 = 13  # 4 planes
-_SHIELD = 17
-_COMPLETED = 18
-_MEEPLE_ME = 19
-_MEEPLE_OPP = 20
-_ABBOT_ME = 21
-_ABBOT_OPP = 22
-_MONFILL = 23
-_SCALAR0 = 24  # 8 scalar planes
-_TILE0 = 32  # 30 current-tile one-hot planes
+_MONASTERY = 13
+_GARDEN = 14
+_SHIELD = 15
+_MEEPLE_ME = 16
+_MEEPLE_OPP = 17
+_ABBOT_ME = 18
+_ABBOT_OPP = 19
+_MONFILL = 20
+_FP0 = 21  # 8 planes: kind * 4 + {size, open, mine, theirs}
+_CUR0 = 29  # 12 current-tile edge planes + 3 flags
+_CUR_FLAGS = 41
+_SCALAR0 = 44
+
+# FeaturePlane normalisation caps (clipped): sizes rarely exceed 10 tiles,
+# open edges 6, meeples-per-player-per-feature 3 in real base-game play.
+_SIZE_CAP = 10.0
+_OPEN_CAP = 6.0
+_MEEPLE_CAP = 3.0
 
 
-def encode_state(state: GameState) -> NDArray[np.float32]:
-    """Encode ``state`` as a ``(NUM_PLANES, WINDOW, WINDOW)`` float32 tensor.
+def valid_mask(crop: Crop, pad_hw: tuple[int, int] | None = None) -> NDArray[np.float32]:
+    """``(ph, pw)`` float mask: 1 inside the crop, 0 in padding. The model's
+    MaskedGroupNorm/value-pool consume this so padding never contaminates stats."""
+    ph, pw = pad_hw or (crop.h, crop.w)
+    m = np.zeros((ph, pw), dtype=np.float32)
+    m[: crop.h, : crop.w] = 1.0
+    return m
 
-    The window is a ``WINDOW x WINDOW`` crop centred on the board's bounding box.
-    Base-game boards fit, but a pathological wide game (e.g. a long straight road)
-    can span more than ``WINDOW`` tiles in one axis; tiles falling outside the crop
-    are simply omitted rather than raising, so self-play and play never crash on a
-    wide board. ``legal_mask`` prunes the corresponding out-of-window moves, so the
-    agent stays consistent with what the encoder can see.
+
+def encode_state(
+    state: GameState, crop: Crop | None = None, pad_hw: tuple[int, int] | None = None
+) -> NDArray[np.float32]:
+    """Encode ``state`` as ``(NUM_PLANES, ph, pw)`` float32 planes.
+
+    Every legal move's cell is inside the crop by construction (bbox + 1), so
+    nothing is ever silently dropped. Padding (beyond ``crop.h/w``) is all-zero.
     """
-    b = WINDOW
-    planes = np.zeros((NUM_PLANES, b, b), dtype=np.float32)
-    ox, oy = window_origin(state)
+    if len(state.scores) != 2:
+        raise RulesError(
+            f"the encoder is 2-player only (me/opp planes); got a {len(state.scores)}-player state"
+        )
+    c = crop or Crop.of(state)
+    ph, pw = pad_hw or (c.h, c.w)
+    assert ph >= c.h and pw >= c.w, f"padding {(ph, pw)} smaller than crop {(c.h, c.w)}"
+    planes = np.zeros((NUM_PLANES, ph, pw), dtype=np.float32)
     me = state.current_player
     opp = 1 - me
     board = state.board
 
     for pos, placed in board.items():
-        wx, wy = pos.x - ox, pos.y - oy
-        if not (0 <= wx < b and 0 <= wy < b):
-            continue  # outside the crop; see docstring
+        gx, gy = pos.x - c.ox, pos.y - c.oy
         tt = TILE_TYPES[placed.type_id]
-        planes[_OCC, wy, wx] = 1.0
+        planes[_OCC, gy, gx] = 1.0
         for si, side in enumerate(_SIDES):
             ki = _EDGE_KINDS.index(world_edge(tt, placed.rotation, side))
-            planes[_EDGE0 + si * 3 + ki, wy, wx] = 1.0
+            planes[_EDGE0 + si * 3 + ki, gy, gx] = 1.0
         has_monastic = False
-        for f in tt.features:
-            planes[_FEAT0 + _FEATURE_KINDS.index(f.kind), wy, wx] = 1.0
+        for i, f in enumerate(tt.features):
             if f.shield:
-                planes[_SHIELD, wy, wx] = 1.0
-            if f.kind in (FeatureKind.MONASTERY, FeatureKind.GARDEN):
+                planes[_SHIELD, gy, gx] = 1.0
+            if f.kind is FeatureKind.MONASTERY:
+                planes[_MONASTERY, gy, gx] = 1.0
                 has_monastic = True
+            elif f.kind is FeatureKind.GARDEN:
+                planes[_GARDEN, gy, gx] = 1.0
+                has_monastic = True
+            elif f.kind in _FP_KINDS:
+                d = state.features.root_data((pos, i))
+                base = _FP0 + _FP_KINDS.index(f.kind) * 4
+                mine = sum(1 for m in d.meeples if m.player == me)
+                theirs = sum(1 for m in d.meeples if m.player == opp)
+                vals = (
+                    min(len(d.tiles), _SIZE_CAP) / _SIZE_CAP,
+                    min(d.open_edges, _OPEN_CAP) / _OPEN_CAP,
+                    min(mine, _MEEPLE_CAP) / _MEEPLE_CAP,
+                    min(theirs, _MEEPLE_CAP) / _MEEPLE_CAP,
+                )
+                for j, v in enumerate(vals):  # max-aggregate over same-kind features
+                    planes[base + j, gy, gx] = max(planes[base + j, gy, gx], v)
         if has_monastic:
             occupied_n = sum(1 for q in neighbours8(pos) if q in board)
-            planes[_MONFILL, wy, wx] = occupied_n / 8.0
+            planes[_MONFILL, gy, gx] = occupied_n / 8.0
 
-    # Feature tiles/meeples live on placed tiles; those outside the crop are
-    # omitted too (same windowing as the tile loop above).
     for d in state.features.data.values():
-        if d.kind in (FeatureKind.CITY, FeatureKind.ROAD) and d.open_edges == 0:
-            for tp in d.tiles:
-                wx, wy = tp.x - ox, tp.y - oy
-                if 0 <= wx < b and 0 <= wy < b:
-                    planes[_COMPLETED, wy, wx] = 1.0
         for m in d.meeples:
             mpos, _feat = m.node
-            wx, wy = mpos.x - ox, mpos.y - oy
-            if not (0 <= wx < b and 0 <= wy < b):
-                continue
+            gx, gy = mpos.x - c.ox, mpos.y - c.oy
             if m.kind is MeepleKind.MEEPLE:
                 plane = _MEEPLE_ME if m.player == me else _MEEPLE_OPP
             else:
                 plane = _ABBOT_ME if m.player == me else _ABBOT_OPP
-            planes[plane, wy, wx] = 1.0
+            planes[plane, gy, gx] = 1.0
 
-    planes[_SCALAR0 + 0] = state.scores[me] / 50.0
-    planes[_SCALAR0 + 1] = state.scores[opp] / 50.0
-    planes[_SCALAR0 + 2] = state.meeples[me] / 7.0
-    planes[_SCALAR0 + 3] = state.meeples[opp] / 7.0
-    planes[_SCALAR0 + 4] = 1.0 if state.abbots[me] else 0.0
-    planes[_SCALAR0 + 5] = 1.0 if state.abbots[opp] else 0.0
-    planes[_SCALAR0 + 6] = len(state.deck) / 71.0
-    planes[_SCALAR0 + 7] = state.turn / 72.0
+    # Broadcast planes fill ONLY the crop region: padding must stay exactly zero.
+    region = (slice(None, c.h), slice(None, c.w))
     if state.current_tile is not None:
-        planes[_TILE0 + _TILE_IDS.index(state.current_tile)] = 1.0
+        tt = TILE_TYPES[state.current_tile]
+        for si, kind in enumerate(derived_edges(tt)):
+            planes[(_CUR0 + si * 3 + _EDGE_KINDS.index(kind), *region)] = 1.0
+        for f in tt.features:
+            if f.kind is FeatureKind.MONASTERY:
+                planes[(_CUR_FLAGS, *region)] = 1.0
+            elif f.kind is FeatureKind.GARDEN:
+                planes[(_CUR_FLAGS + 1, *region)] = 1.0
+            if f.shield:
+                planes[(_CUR_FLAGS + 2, *region)] = 1.0
+
+    scalars = (
+        state.scores[me] / 50.0,
+        state.scores[opp] / 50.0,
+        state.meeples[me] / 7.0,
+        state.meeples[opp] / 7.0,
+        1.0 if state.abbots[me] else 0.0,
+        1.0 if state.abbots[opp] else 0.0,
+        len(state.deck) / 71.0,
+        state.turn / 72.0,
+    )
+    for j, v in enumerate(scalars):
+        planes[(_SCALAR0 + j, *region)] = v
 
     return planes
