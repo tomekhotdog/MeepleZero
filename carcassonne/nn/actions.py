@@ -1,24 +1,30 @@
-"""Deterministic ``Move`` <-> ``int`` mapping for the policy head.
+"""World-coordinate ``Move`` codec + the per-state dynamic **Crop**.
 
-The action space is a fixed ``WINDOW x WINDOW`` grid of board cells, times four
-rotations, times 14 per-placement actions::
+Iteration 3 removed the fixed 31x31 window. The board is encoded over a
+per-state Crop: the bounding box of placed tiles plus a 1-cell border. A new
+tile can only be placed adjacent to an existing one, so the border provably
+contains every legal placement -- every legal move is always representable
+(the old "silently dropped out-of-window move" case is impossible).
 
-    action_id = ((wy * B + wx) * 4 + rot) * 14 + a
+Two vocabularies:
 
-where ``a`` selects the meeple decision on the freshly placed tile:
+* **Key** ``(x, y, rot, a)`` -- world coordinates, the engine's own vocabulary.
+  Stable under any crop; this is what the replay buffer stores.
+* **flat index** ``((gy*W + gx) * 4 + rot) * 14 + a`` with ``gx = x - crop.ox``,
+  ``gy = y - crop.oy`` -- the policy head's per-state layout. ``W`` is the
+  *stride width*: the crop's own width, or the padded width in a learner batch.
+
+``a`` selects the meeple decision on the freshly placed tile::
 
     a == 0            -> action None (place tile, no piece)
     1 <= a <= 6       -> PlaceMeeple(feature = a - 1, MEEPLE)   feature 0..5
     7 <= a <= 12      -> PlaceMeeple(feature = a - 7, ABBOT)    feature 0..5
     a == 13           -> RetrieveAbbot()
-
-Board cells are mapped into the window by centring the board's occupied bounding
-box in the ``BxB`` grid (see :func:`window_origin`). The mapping is recomputed
-from the *current* state on every call, so it is stable within a turn and always
-keeps the live board centred.
 """
 
 from __future__ import annotations
+
+from typing import NamedTuple
 
 import numpy as np
 from numpy.typing import NDArray
@@ -35,41 +41,33 @@ from carcassonne.core.types import (
     TurnAction,
 )
 
-WINDOW = 31
-_ROTS = 4
-_ACTIONS = 14  # None + 6 meeple slots + 6 abbot slots + retrieve
+ROTS = 4
+ACTIONS = 14  # None + 6 meeple slots + 6 abbot slots + retrieve
+ACTIONS_PER_CELL = ROTS * ACTIONS  # 56 policy channels per cell
 _MAX_FEATURE = 5  # feature index must fit in the 6 slots reserved per meeple kind
 
-ACTION_SPACE = WINDOW * WINDOW * _ROTS * _ACTIONS
-assert ACTION_SPACE == 53816, ACTION_SPACE
+type Key = tuple[int, int, int, int]  # (x, y, rot, a) in world coordinates
 
 
-def window_origin(state: GameState, window: int = WINDOW) -> tuple[int, int]:
-    """World ``Pos`` that maps to window cell ``(0, 0)``.
+class Crop(NamedTuple):
+    """Per-state board window: bounding box of placed tiles + 1-cell border."""
 
-    The board's occupied bounding box is centred in the ``window x window`` grid,
-    so a fresh game (only the start tile at the origin) lands the start tile at
-    the window centre.
-    """
-    xs = [p.x for p in state.board]
-    ys = [p.y for p in state.board]
-    minx, maxx = min(xs), max(xs)
-    miny, maxy = min(ys), max(ys)
-    origin_x = minx - (window - (maxx - minx + 1)) // 2
-    origin_y = miny - (window - (maxy - miny + 1)) // 2
-    return origin_x, origin_y
+    ox: int  # world x mapped to grid column 0
+    oy: int  # world y mapped to grid row 0
+    h: int
+    w: int
 
+    @staticmethod
+    def of(state: GameState) -> Crop:
+        xs = [p.x for p in state.board]
+        ys = [p.y for p in state.board]
+        minx, maxx = min(xs), max(xs)
+        miny, maxy = min(ys), max(ys)
+        return Crop(minx - 1, miny - 1, (maxy - miny) + 3, (maxx - minx) + 3)
 
-def to_window(state: GameState, pos: Pos, window: int = WINDOW) -> tuple[int, int]:
-    """World ``Pos`` -> ``(wx, wy)`` window coordinates."""
-    ox, oy = window_origin(state, window)
-    return pos.x - ox, pos.y - oy
-
-
-def from_window(state: GameState, wx: int, wy: int, window: int = WINDOW) -> Pos:
-    """``(wx, wy)`` window coordinates -> world ``Pos``."""
-    ox, oy = window_origin(state, window)
-    return Pos(wx + ox, wy + oy)
+    @property
+    def n_actions(self) -> int:
+        return self.h * self.w * ACTIONS_PER_CELL
 
 
 def _action_index(action: TurnAction) -> int:
@@ -96,56 +94,77 @@ def _decode_action(a: int) -> TurnAction:
     raise RulesError(f"action sub-index {a} out of range")
 
 
-def _encode_with_origin(move: Move, origin: tuple[int, int]) -> int:
-    wx, wy = move.pos.x - origin[0], move.pos.y - origin[1]
-    if not (0 <= wx < WINDOW and 0 <= wy < WINDOW):
-        raise RulesError(f"move at {move.pos} maps outside the {WINDOW}x{WINDOW} window")
-    a = _action_index(move.action)
-    return ((wy * WINDOW + wx) * _ROTS + int(move.rotation)) * _ACTIONS + a
+def move_key(move: Move) -> Key:
+    """``Move`` -> world-coordinate Key (the buffer's storage format)."""
+    return (move.pos.x, move.pos.y, int(move.rotation), _action_index(move.action))
+
+
+def key_move(key: Key) -> Move:
+    """Key -> ``Move`` (inverse of :func:`move_key`)."""
+    x, y, rot, a = key
+    return Move(Pos(x, y), Rotation(rot), _decode_action(a))
+
+
+def rotate_key(key: Key, k: int = 1) -> Key:
+    """Rotate a Key 90 degrees clockwise in world space, ``k`` times.
+
+    Matches ``learner.rotate_state_90``: cell ``(x, y) -> (y, -x)`` and the tile
+    rotation advances one quarter-turn. The sub-action ``a`` names a tile-local
+    feature index, invariant under board rotation.
+    """
+    x, y, rot, a = key
+    for _ in range(k % 4):
+        x, y, rot = y, -x, (rot + 1) % 4
+    return (x, y, rot, a)
+
+
+def flat_index(crop: Crop, key: Key, stride_w: int | None = None) -> int:
+    """Key -> flat policy index for ``crop``, using ``stride_w`` as row stride.
+
+    ``stride_w`` defaults to ``crop.w``; the learner passes the padded batch
+    width. Raises :class:`RulesError` if the key's cell is outside the crop --
+    impossible for a legal move, so this failing is loud, never silent.
+    """
+    x, y, rot, a = key
+    gx, gy = x - crop.ox, y - crop.oy
+    if not (0 <= gx < crop.w and 0 <= gy < crop.h):
+        raise RulesError(f"cell ({x}, {y}) outside crop {crop}")
+    w = crop.w if stride_w is None else stride_w
+    return ((gy * w + gx) * ROTS + rot) * ACTIONS + a
 
 
 def encode_move(state: GameState, move: Move) -> int:
-    """``Move`` -> action id in ``[0, ACTION_SPACE)``.
-
-    Raises :class:`RulesError` if the move's position falls outside the window
-    (impossible for legal moves on a base-game board; surfaced loudly if it ever
-    happens).
-    """
-    return _encode_with_origin(move, window_origin(state))
+    """``Move`` -> flat index in ``[0, Crop.of(state).n_actions)``."""
+    return flat_index(Crop.of(state), move_key(move))
 
 
 def decode_move(state: GameState, idx: int) -> Move:
-    """Action id -> ``Move`` (inverse of :func:`encode_move`)."""
-    if not 0 <= idx < ACTION_SPACE:
-        raise RulesError(f"action id {idx} out of range")
-    a = idx % _ACTIONS
-    rest = idx // _ACTIONS
-    rot = rest % _ROTS
-    rest //= _ROTS
-    wx = rest % WINDOW
-    wy = rest // WINDOW
-    return Move(from_window(state, wx, wy), Rotation(rot), _decode_action(a))
+    """Flat index -> ``Move`` (inverse of :func:`encode_move`)."""
+    crop = Crop.of(state)
+    if not 0 <= idx < crop.n_actions:
+        raise RulesError(f"action id {idx} out of range for crop {crop}")
+    a = idx % ACTIONS
+    rest = idx // ACTIONS
+    rot = rest % ROTS
+    rest //= ROTS
+    gx = rest % crop.w
+    gy = rest // crop.w
+    return Move(Pos(gx + crop.ox, gy + crop.oy), Rotation(rot), _decode_action(a))
 
 
-def legal_mask(state: GameState) -> NDArray[np.bool_]:
-    """Boolean mask of shape ``(ACTION_SPACE,)``, True at every legal move id that
-    fits the window.
+def legal_mask(
+    state: GameState, crop: Crop | None = None, pad_hw: tuple[int, int] | None = None
+) -> NDArray[np.bool_]:
+    """Boolean mask, True at exactly the flat indices of legal moves.
 
-    On base-game boards every legal move fits, so the mask marks exactly the legal
-    set. On boards wider than ``WINDOW`` (reachable when a search or a long game
-    spreads tiles past 31 cells across), a few legal placements fall outside the
-    window; the policy head has no slot for them, so they stay masked-out rather
-    than crashing the mask. MCTS prunes those same moves (see ``agents.mcts``).
-
-    Invariant: the mask is never all-False for a non-terminal state in real play.
-    Zeroing it needs a fully-packed ~31x31 region (~961 tiles), but the base game
-    caps total placements at 72, so an in-window frontier cell always survives.
+    Shape ``(ph * pw * 56,)`` where ``(ph, pw)`` is ``pad_hw`` (the learner's
+    padded batch geometry) or the crop's own ``(h, w)``. Never all-False for a
+    non-terminal state: the crop contains every legal move by construction.
     """
-    mask = np.zeros(ACTION_SPACE, dtype=np.bool_)
-    origin = window_origin(state)  # hoisted: same for every move this turn (MCTS hot path)
+    c = crop or Crop.of(state)
+    ph, pw = pad_hw or (c.h, c.w)
+    assert ph >= c.h and pw >= c.w, f"padding {(ph, pw)} smaller than crop {(c.h, c.w)}"
+    mask = np.zeros(ph * pw * ACTIONS_PER_CELL, dtype=np.bool_)
     for move in legal_moves(state):
-        try:
-            mask[_encode_with_origin(move, origin)] = True
-        except RulesError:
-            continue  # move maps outside the window; unrepresentable, leave masked-out
+        mask[flat_index(c, move_key(move), stride_w=pw)] = True
     return mask

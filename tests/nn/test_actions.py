@@ -1,64 +1,99 @@
+# tests/nn/test_actions.py
+"""Crop geometry and the world-coordinate Move codec.
+
+Correctness backbone: for ANY reachable state, the crop contains every legal
+move, and encode/decode is a bijection between legal moves and flat indices.
+"""
 from __future__ import annotations
 
 import random
 
-from carcassonne.core import apply, is_terminal, legal_moves, new_game
-from carcassonne.core.engine import GameState
-from carcassonne.core.types import Pos
+import pytest
+
+from carcassonne.core import GameConfig, apply, is_terminal, legal_moves, new_game
+from carcassonne.core.types import MeepleKind, Move, PlaceMeeple, Pos, Rotation, RulesError
 from carcassonne.nn.actions import (
-    ACTION_SPACE,
+    ACTIONS_PER_CELL,
+    Crop,
     decode_move,
     encode_move,
+    flat_index,
+    key_move,
     legal_mask,
-    to_window,
-    window_origin,
+    move_key,
+    rotate_key,
 )
 
 
-def _sample_states(n: int, seed: int) -> list[GameState]:
-    """States sampled along random games (each recorded before a random move)."""
+def _random_states(seed: int, n_states: int = 30):
+    """Yield states sampled from a random playthrough (fresh game per exhaustion)."""
     rng = random.Random(seed)
-    states: list[GameState] = []
-    state = new_game(rng.randint(0, 10_000))
-    while len(states) < n:
+    state = new_game(rng.randrange(10_000), GameConfig())
+    for _ in range(n_states):
         if is_terminal(state):
-            state = new_game(rng.randint(0, 10_000))
-            continue
-        states.append(state)
+            state = new_game(rng.randrange(10_000), GameConfig())
+        yield state
         state = apply(state, rng.choice(legal_moves(state)))
-    return states
 
 
-def test_action_space_size() -> None:
-    assert ACTION_SPACE == 53816
+def test_crop_is_bbox_plus_one_border() -> None:
+    state = new_game(0, GameConfig())  # single start tile at (0, 0)
+    crop = Crop.of(state)
+    assert (crop.ox, crop.oy, crop.h, crop.w) == (-1, -1, 3, 3)
+    assert crop.n_actions == 3 * 3 * ACTIONS_PER_CELL
 
 
-def test_window_origin_centres_fresh_game() -> None:
-    state = new_game(0)
-    assert list(state.board) == [Pos(0, 0)]  # only the start tile
-    ox, oy = window_origin(state)
-    assert (ox, oy) == (-15, -15)
-    assert to_window(state, Pos(0, 0)) == (15, 15)
+def test_crop_contains_every_legal_move() -> None:
+    for state in _random_states(1, n_states=60):
+        crop = Crop.of(state)
+        for m in legal_moves(state):
+            gx, gy = m.pos.x - crop.ox, m.pos.y - crop.oy
+            assert 0 <= gx < crop.w and 0 <= gy < crop.h
 
 
-def test_round_trip_over_legal_moves() -> None:
-    for state in _sample_states(50, seed=7):
-        moves = legal_moves(state)
-        ids = set()
-        for move in moves:
-            idx = encode_move(state, move)
-            assert decode_move(state, idx) == move
-            ids.add(idx)
-        assert len(ids) == len(moves)  # encode is injective over the legal set
+def test_encode_decode_roundtrip_all_legal_moves() -> None:
+    for state in _random_states(2, n_states=40):
+        for m in legal_moves(state):
+            assert decode_move(state, encode_move(state, m)) == m
 
 
-def test_legal_mask_matches_legal_moves() -> None:
-    for state in _sample_states(50, seed=11):
-        moves = legal_moves(state)
+def test_legal_mask_bijection() -> None:
+    """mask True exactly at the encodings of legal moves — no drops, no ghosts."""
+    for state in _random_states(3, n_states=40):
+        crop = Crop.of(state)
         mask = legal_mask(state)
-        assert mask.shape == (ACTION_SPACE,)
-        assert mask.dtype == bool
-        assert int(mask.sum()) == len(moves)
-        legal = set(moves)
-        for idx in mask.nonzero()[0]:
-            assert decode_move(state, int(idx)) in legal
+        assert mask.shape == (crop.n_actions,)
+        expected = {encode_move(state, m) for m in legal_moves(state)}
+        got = {int(i) for i in mask.nonzero()[0]}
+        assert got == expected
+
+
+def test_padded_stride_indexing() -> None:
+    """flat_index with a wider stride matches manual arithmetic (learner padding)."""
+    state = new_game(0, GameConfig())
+    crop = Crop.of(state)  # 3x3
+    m = legal_moves(state)[0]
+    key = move_key(m)
+    idx = flat_index(crop, key, stride_w=10)
+    gx, gy = key[0] - crop.ox, key[1] - crop.oy
+    assert idx == ((gy * 10 + gx) * 4 + key[2]) * 14 + key[3]
+    padded = legal_mask(state, pad_hw=(10, 10))
+    assert padded.shape == (10 * 10 * ACTIONS_PER_CELL,)
+    assert padded[idx]
+
+
+def test_move_key_roundtrip_and_rotation() -> None:
+    m = Move(Pos(3, -2), Rotation.R90, PlaceMeeple(2, MeepleKind.ABBOT))
+    assert key_move(move_key(m)) == m
+    k = move_key(m)
+    k4 = k
+    for _ in range(4):
+        k4 = rotate_key(k4)
+    assert k4 == k  # four quarter-turns are the identity
+    assert rotate_key(k)[:3] == (-2, -3, 2)  # (x,y)->(y,-x), rot+1
+
+
+def test_flat_index_raises_outside_crop() -> None:
+    state = new_game(0, GameConfig())
+    with pytest.raises(RulesError):
+        flat_index(Crop.of(state), (99, 99, 0, 0))
