@@ -213,6 +213,9 @@ def _bench(args: argparse.Namespace) -> int:
     from carcassonne.training.run import TrainingRun
     from carcassonne.training.selfplay import play_selfplay_game
 
+    if args.games < 1:
+        print("error: --games must be >= 1", file=sys.stderr)
+        return 2
     net = CarcassonneNet(channels=args.channels, n_blocks=args.n_blocks)
     net.eval()
     device = torch.device("cpu")
