@@ -151,3 +151,47 @@ def test_greedy_crushes_random() -> None:
     r = run_match(GreedyAgent(), RandomAgent(), n_games=20, base_seed=7)
     assert r.games == 20
     assert r.wins[0] >= 17  # greedy wins >=85% vs random
+
+
+# --- best-of-rest generalisation (2-5 players) ---
+
+
+def test_value_equals_old_two_player_formula() -> None:
+    """Best-of-rest reduces exactly to (my - opp) at n=2: prove over a real game."""
+    from dataclasses import replace as dc_replace
+
+    from carcassonne.agents.greedy import _W_POTENTIAL, _W_SUPPLY, _value
+    from carcassonne.core import apply as core_apply
+    from carcassonne.core import new_game
+
+    state = new_game(4)
+    rng = random.Random(4)
+    for _ in range(20):  # 20 plies deep, checking every legal move at each
+        if not legal_moves(state):
+            break
+        me, opp = state.current_player, 1 - state.current_player
+        pot_me = endgame_potential(state, me)
+        pot_opp = endgame_potential(state, opp)
+        probe = dc_replace(state, deck=())
+        for move in legal_moves(state):
+            nxt = core_apply(probe, move)
+            supply = nxt.meeples[me] + (1 if nxt.abbots[me] else 0)
+            old = (
+                (nxt.scores[me] - probe.scores[me])
+                - (nxt.scores[opp] - probe.scores[opp])
+                + _W_POTENTIAL * (endgame_potential(nxt, me) - pot_me)
+                - _W_POTENTIAL * (endgame_potential(nxt, opp) - pot_opp)
+                + _W_SUPPLY * supply
+            )
+            assert _value(probe, move, me, pot_me, {opp: pot_opp}) == pytest.approx(old)
+        state = core_apply(state, rng.choice(legal_moves(state)))
+
+
+def test_greedy_plays_a_legal_three_player_game() -> None:
+    from carcassonne.core import GameConfig
+    from carcassonne.game.match import play_game
+
+    r = play_game(
+        (GreedyAgent(), RandomAgent(), RandomAgent()), seed=2, config=GameConfig(num_players=3)
+    )
+    assert len(r.final_scores) == 3  # play_game verifies legality throughout

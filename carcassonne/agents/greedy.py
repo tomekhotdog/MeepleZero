@@ -3,14 +3,16 @@
 Every legal move is applied (`core.apply`) and the resulting state is valued
 from the mover's perspective:
 
-    value(move) = my_score_delta - opp_score_delta
-                + 0.7 * Δ(my endgame_potential) - 0.7 * Δ(opp endgame_potential)
+    value(move) = (my_score_delta + 0.7 * Δ(my endgame_potential))
+                - max over opponents o of (o_score_delta + 0.7 * Δ(o endgame_potential))
                 + 0.15 * my pieces in supply after the move (meeples + abbot)
 
 where `endgame_potential` (core) is a player's share of final_scores' end-game
 component. The score deltas reward completions; the potential terms reward
-claiming/growing features and blocking the opponent's; the supply term nudges
-against squandering pieces on low-value features.
+claiming/growing features and blocking the strongest opponent's; the supply
+term nudges against squandering pieces on low-value features. With two players
+the max is over the single opponent, so this is exactly the classic
+(my gain - opp gain) formula.
 """
 
 from __future__ import annotations
@@ -39,15 +41,15 @@ class GreedyAgent:
     def choose(self, state: GameState, ctx: TurnContext) -> tuple[Move, Annot | None]:
         start = time.perf_counter()
         me: Player = state.current_player
-        opp: Player = 1 - me
         pot_me = endgame_potential(state, me)
-        pot_opp = endgame_potential(state, opp)
+        # Opponents' pre-move potentials, hoisted out of the per-move loop.
+        pot_others = {o: endgame_potential(state, o) for o in range(len(state.scores)) if o != me}
         moves = legal_moves(state)
         # Evaluate on a deckless copy: apply's post-move draw scans the board for
         # a placeable tile, which dominates runtime and cannot affect the value
         # (scores, supplies, and features are settled before the draw).
         probe = replace(state, deck=())
-        values = [_value(probe, move, me, opp, pot_me, pot_opp) for move in moves]
+        values = [_value(probe, move, me, pot_me, pot_others) for move in moves]
         best = max(values)
         move = ctx.rng.choice([m for m, v in zip(moves, values, strict=True) if v == best])
         if not ctx.annotate:
@@ -57,17 +59,18 @@ class GreedyAgent:
 
 
 def _value(
-    state: GameState, move: Move, me: Player, opp: Player, pot_me: int, pot_opp: int
+    state: GameState, move: Move, me: Player, pot_me: int, pot_others: dict[Player, int]
 ) -> float:
     nxt = apply(state, move)
     supply = nxt.meeples[me] + (1 if nxt.abbots[me] else 0)
-    return (
-        (nxt.scores[me] - state.scores[me])
-        - (nxt.scores[opp] - state.scores[opp])
-        + _W_POTENTIAL * (endgame_potential(nxt, me) - pot_me)
-        - _W_POTENTIAL * (endgame_potential(nxt, opp) - pot_opp)
-        + _W_SUPPLY * supply
+    my_gain = (nxt.scores[me] - state.scores[me]) + _W_POTENTIAL * (
+        endgame_potential(nxt, me) - pot_me
     )
+    best_rest = max(
+        (nxt.scores[o] - state.scores[o]) + _W_POTENTIAL * (endgame_potential(nxt, o) - pot_o)
+        for o, pot_o in pot_others.items()
+    )
+    return my_gain - best_rest + _W_SUPPLY * supply
 
 
 def _annot(
