@@ -229,6 +229,15 @@ def test_choose_with_policy_rejects_non_two_player_state() -> None:
         )
 
 
+def test_visit_policy_rejects_non_two_player_state() -> None:
+    # Unguarded, a 3-player search would not crash — it would return a
+    # plausible but semantically wrong distribution (negamax assumes two
+    # alternating players). All three public entry points must reject loudly.
+    agent = MctsAgent(_net(), DEVICE, MctsConfig(sims=1))
+    with pytest.raises(RulesError, match="2-player"):
+        agent.visit_policy(new_game(0, GameConfig(num_players=3)))
+
+
 # ---------------------------------------------------------------------------
 # End-to-end: MctsAgent plays complete, legal games against RandomAgent without
 # crashing.

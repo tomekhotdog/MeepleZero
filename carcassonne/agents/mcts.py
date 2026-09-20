@@ -88,11 +88,22 @@ class _Node:
     children: dict[int, _Node] = field(default_factory=dict)
 
 
+def _require_two_players(state: GameState) -> None:
+    """Loud 2-player boundary: negamax backup assumes exactly two alternating
+    players, so every public search entry point must reject other counts —
+    an unguarded search would return a plausible but wrong distribution."""
+    if len(state.scores) != 2:
+        raise RulesError(
+            f"MctsAgent is 2-player only (negamax backup); "
+            f"got a {len(state.scores)}-player state"
+        )
+
+
 def _terminal_value(state: GameState) -> float:
     """Game outcome from the perspective of the player to move at this terminal
     state: +1 win, -1 loss, 0 draw. See the module docstring on why this is
     correct despite no one actually moving at a terminal node."""
-    # 2-tuple unpack is safe: choose/choose_with_policy guard len(scores) == 2.
+    # 2-tuple unpack is safe: every public entry calls _require_two_players.
     s0, s1 = final_scores(state)
     if s0 == s1:
         return 0.0
@@ -126,11 +137,7 @@ class MctsAgent:
     # -- Agent protocol -----------------------------------------------------
 
     def choose(self, state: GameState, ctx: TurnContext) -> tuple[Move, Annot | None]:
-        if len(state.scores) != 2:
-            raise RulesError(
-                f"MctsAgent is 2-player only (negamax backup); "
-                f"got a {len(state.scores)}-player state"
-            )
+        _require_two_players(state)
         start = time.perf_counter()
         rng = np.random.default_rng(ctx.rng.getrandbits(64))
         root = self._search(state, rng, add_noise=self._self_play)
@@ -153,11 +160,7 @@ class MctsAgent:
         self-play game pays for exactly one search per move (not one for the move
         and another for the target). Honours ``self_play`` (root Dirichlet noise +
         temperature sampling) identically to :meth:`choose`; always annotates."""
-        if len(state.scores) != 2:
-            raise RulesError(
-                f"MctsAgent is 2-player only (negamax backup); "
-                f"got a {len(state.scores)}-player state"
-            )
+        _require_two_players(state)
         start = time.perf_counter()
         rng = np.random.default_rng(ctx.rng.getrandbits(64))
         root = self._search(state, rng, add_noise=self._self_play)
@@ -172,6 +175,7 @@ class MctsAgent:
         ``{move: N[i] / sum(N)}`` over legal moves -- the self-play training target
         and the ``/hint`` source. Noise-free and deterministic (search uses no
         randomness of its own), so it needs no rng."""
+        _require_two_players(state)
         return self._visit_dist(self._search(state, rng=None, add_noise=False))
 
     @staticmethod
