@@ -22,6 +22,7 @@ def main(argv: list[str] | None = None) -> int:
         "evaluate": _evaluate,
         "serve": _serve,
         "train": _train,
+        "bench": _bench,
     }
     return handlers[args.command](args)
 
@@ -64,6 +65,13 @@ def _build_parser() -> argparse.ArgumentParser:
     tr.add_argument(
         "--device", choices=["auto", "cpu"], default="auto", help="compute device (default auto)"
     )
+
+    be = sub.add_parser("bench", help="time self-play games (throughput yardstick)")
+    be.add_argument("--games", type=int, default=4, help="games to play (default 4)")
+    be.add_argument("--sims", type=int, default=32, help="MCTS sims per move (default 32)")
+    be.add_argument("--channels", type=int, default=48, help="network channels")
+    be.add_argument("--n-blocks", type=int, default=4, help="residual blocks")
+    be.add_argument("--seed", type=int, default=0, help="seed of game 0; game i uses seed+i")
 
     srv = sub.add_parser("serve", help="run the web app (play + replay API)")
     srv.add_argument("--host", default="127.0.0.1", help="bind address (default 127.0.0.1)")
@@ -186,6 +194,50 @@ def _train(args: argparse.Namespace) -> int:
         # The signal handler set the stop flag; train() flushed a checkpoint and
         # returned. This only fires if a second Ctrl-C races the handler removal.
         print("\ninterrupted; latest checkpoint is intact", file=sys.stderr)
+    return 0
+
+
+def _bench(args: argparse.Namespace) -> int:
+    """Time sequential self-play with a fresh (untrained) net on CPU.
+
+    Untrained-net throughput is representative: per-move cost is sims x one
+    net evaluation regardless of weights. Uses a throwaway run dir for replays.
+    """
+    import tempfile
+    import time
+
+    import torch
+
+    from carcassonne.agents.mcts import MctsConfig
+    from carcassonne.nn.model import CarcassonneNet, param_count
+    from carcassonne.training.run import TrainingRun
+    from carcassonne.training.selfplay import play_selfplay_game
+
+    net = CarcassonneNet(channels=args.channels, n_blocks=args.n_blocks)
+    net.eval()
+    device = torch.device("cpu")
+    with tempfile.TemporaryDirectory() as td:
+        run = TrainingRun.create(Path(td) / "bench", {"bench": True})
+        t0 = time.perf_counter()
+        for i in range(args.games):
+            play_selfplay_game(
+                net=net,
+                device=device,
+                seed=args.seed + i,
+                run=run,
+                mcts_config=MctsConfig(sims=args.sims),
+                game_id=f"bench{i:04d}",
+                started_at="bench",
+                order_key=i,
+                buffer=None,
+            )
+        dt = time.perf_counter() - t0
+    print(f"params={param_count(net)}")
+    print(
+        f"games={args.games} sims={args.sims} channels={args.channels} "
+        f"n_blocks={args.n_blocks} total={dt:.1f}s s/game={dt / args.games:.1f} "
+        f"games/hour={args.games / dt * 3600:.1f}"
+    )
     return 0
 
 

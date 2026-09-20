@@ -1668,9 +1668,12 @@ git add -A && git commit -m "feat(training)!: iteration-3 defaults (48ch x 4 blo
 
 ---
 
-## Baseline (recorded at Task 1)
+## Baseline (recorded at Task 1, 2026-09-20, Intel Mac CPU)
 
-- `bench --games 2 --sims 16 --channels 64 --n-blocks 5` → *(paste output here)*
+- `bench --games 2 --sims 16 --channels 64 --n-blocks 5` →
+  `params=655865`
+  `games=2 sims=16 channels=64 n_blocks=5 total=50.2s s/game=25.1 games/hour=143.4`
+- ≥5× bar for Task 10's after-bench: **≥ 717 games/hour** at the same games/sims settings.
 
 ## Results (recorded at Task 10)
 
