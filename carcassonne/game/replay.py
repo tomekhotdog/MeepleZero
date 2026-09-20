@@ -35,7 +35,8 @@ from carcassonne.game.serde import (
     move_to_json,
 )
 
-REPLAY_VERSION = 1
+REPLAY_VERSION = 2
+_SUPPORTED_VERSIONS = (1, 2)
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,7 +44,7 @@ class ReplayHeader:
     v: int
     seed: int
     config: GameConfig
-    agents: tuple[str, str]
+    agents: tuple[str, ...]  # one name per seat
     checkpoint: str | None
     started_at: str  # caller-provided ISO-8601 string
 
@@ -63,7 +64,13 @@ class Replay:
     header: ReplayHeader
     moves: tuple[MoveRecord, ...]
     final_scores: tuple[int, ...]
-    winner: int | None  # 0 | 1 | None (draw)
+    winners: tuple[int, ...]  # tie set: singleton = outright win, larger = shared
+
+
+def winners_of(scores: tuple[int, ...]) -> tuple[int, ...]:
+    """Tie set of top scorers: singleton = outright win, larger = shared."""
+    best = max(scores)
+    return tuple(p for p, s in enumerate(scores) if s == best)
 
 
 class ReplayWriter:
@@ -74,12 +81,20 @@ class ReplayWriter:
     def __init__(self, path: Path, header: ReplayHeader) -> None:
         if header.v != REPLAY_VERSION:
             raise RulesError(f"unsupported replay version {header.v} (writer is v{REPLAY_VERSION})")
+        if len(header.agents) != header.config.num_players:
+            raise RulesError(
+                f"header names {len(header.agents)} agents"
+                f" for {header.config.num_players} players"
+            )
         self._file: TextIO = path.open("w", encoding="utf-8")
         self._write(
             {
                 "v": header.v,
                 "seed": header.seed,
-                "config": {"meeples_per_player": header.config.meeples_per_player},
+                "config": {
+                    "meeples_per_player": header.config.meeples_per_player,
+                    "num_players": header.config.num_players,
+                },
                 "agents": list(header.agents),
                 "checkpoint": header.checkpoint,
                 "started_at": header.started_at,
@@ -111,7 +126,7 @@ class ReplayWriter:
             {
                 "end": True,
                 "final_scores": list(final_scores),
-                "winner": _winner(final_scores),
+                "winners": list(winners_of(final_scores)),
             }
         )
         self._file.close()
@@ -145,23 +160,44 @@ def load_replay(path: Path) -> Replay:
     if len(rows) < 2:
         raise RulesError("replay must have a header line and an end line")
     header = _header_from_json(rows[0])
+    num_players = header.config.num_players
     end = rows[-1]
     if not (isinstance(end, dict) and end.get("end") is True):
         raise RulesError("replay has no end line (incomplete replays do not load)")
     moves = tuple(
-        _move_record_from_json(row, expected_n=i) for i, row in enumerate(rows[1:-1])
+        _move_record_from_json(row, expected_n=i, num_players=num_players)
+        for i, row in enumerate(rows[1:-1])
     )
-    finals = _scores_field(end, "final_scores")
-    winner = end.get("winner")
-    if isinstance(winner, bool) or winner not in (0, 1, None):
-        raise RulesError(f"field 'winner' must be 0, 1 or null, got {winner!r}")
-    return Replay(header=header, moves=moves, final_scores=finals, winner=winner)
+    finals = _scores_field(end, "final_scores", num_players)
+    winners = _winners_field(end, header.v, num_players)
+    return Replay(header=header, moves=moves, final_scores=finals, winners=winners)
+
+
+def _winners_field(end: dict[Any, Any], v: int, num_players: int) -> tuple[int, ...]:
+    if v == 1:  # v1 wrote a single 'winner'; null meant a two-way tie
+        winner = end.get("winner")
+        if isinstance(winner, bool) or winner not in (0, 1, None):
+            raise RulesError(f"field 'winner' must be 0, 1 or null, got {winner!r}")
+        return (0, 1) if winner is None else (winner,)
+    raw = end.get("winners")
+    if not (
+        isinstance(raw, list)
+        and raw
+        and all(isinstance(w, int) and not isinstance(w, bool) for w in raw)
+        and all(0 <= w < num_players for w in raw)
+        and all(a < b for a, b in zip(raw, raw[1:], strict=False))
+    ):
+        raise RulesError(
+            f"field 'winners' must be a non-empty strictly increasing list of"
+            f" player indices in 0..{num_players - 1}, got {raw!r}"
+        )
+    return tuple(raw)
 
 
 def replay_states(replay: Replay) -> Iterator[GameState]:
     """Yield the state before each recorded move, then the terminal state,
     re-deriving everything via the rules core and verifying each record
-    (tile drawn, player to move, score after, final scores, winner).
+    (tile drawn, player to move, score after, final scores, winners).
     RulesError on any mismatch."""
     state = new_game(replay.header.seed, replay.header.config)
     for rec in replay.moves:
@@ -193,37 +229,52 @@ def replay_states(replay: Replay) -> Iterator[GameState]:
             f"recorded final_scores {list(replay.final_scores)},"
             f" engine computed {list(finals)}"
         )
-    if replay.winner != _winner(finals):
-        raise RulesError(f"recorded winner {replay.winner!r}, engine computed {_winner(finals)!r}")
+    if replay.winners != winners_of(finals):
+        raise RulesError(
+            f"recorded winners {list(replay.winners)},"
+            f" engine computed {list(winners_of(finals))}"
+        )
     yield state
-
-
-def _winner(scores: tuple[int, ...]) -> int | None:
-    if scores[0] == scores[1]:
-        return None
-    return 0 if scores[0] > scores[1] else 1
 
 
 def _header_from_json(row: object) -> ReplayHeader:
     if not isinstance(row, dict):
         raise RulesError(f"header must be an object, got {type(row).__name__}")
     v = _int_field(row, "v")
-    if v != REPLAY_VERSION:
-        raise RulesError(f"unsupported replay version {v} (expected {REPLAY_VERSION})")
+    if v not in _SUPPORTED_VERSIONS:
+        raise RulesError(f"unsupported replay version {v} (supported: {_SUPPORTED_VERSIONS})")
     seed = _int_field(row, "seed")
     config_raw = row.get("config")
-    if not isinstance(config_raw, dict) or set(config_raw) != {"meeples_per_player"}:
-        raise RulesError(
-            f"field 'config' must be {{'meeples_per_player': int}}, got {config_raw!r}"
+    if v == 1:  # v1 predates multiplayer: config has no num_players, always 2 seats
+        if not isinstance(config_raw, dict) or set(config_raw) != {"meeples_per_player"}:
+            raise RulesError(
+                f"field 'config' must be {{'meeples_per_player': int}}, got {config_raw!r}"
+            )
+        config = GameConfig(
+            meeples_per_player=_int_field(config_raw, "meeples_per_player"), num_players=2
         )
-    config = GameConfig(meeples_per_player=_int_field(config_raw, "meeples_per_player"))
+    else:
+        if not isinstance(config_raw, dict) or set(config_raw) != {
+            "meeples_per_player",
+            "num_players",
+        }:
+            raise RulesError(
+                f"field 'config' must be {{'meeples_per_player': int, 'num_players': int}},"
+                f" got {config_raw!r}"
+            )
+        config = GameConfig(
+            meeples_per_player=_int_field(config_raw, "meeples_per_player"),
+            num_players=_int_field(config_raw, "num_players"),
+        )
     agents_raw = row.get("agents")
     if not (
         isinstance(agents_raw, list)
-        and len(agents_raw) == 2
+        and len(agents_raw) == config.num_players
         and all(isinstance(a, str) for a in agents_raw)
     ):
-        raise RulesError(f"field 'agents' must be a list of two strings, got {agents_raw!r}")
+        raise RulesError(
+            f"field 'agents' must be a list of {config.num_players} strings, got {agents_raw!r}"
+        )
     checkpoint = row.get("checkpoint")
     if checkpoint is not None and not isinstance(checkpoint, str):
         raise RulesError(f"field 'checkpoint' must be a string or null, got {checkpoint!r}")
@@ -234,21 +285,23 @@ def _header_from_json(row: object) -> ReplayHeader:
         v=v,
         seed=seed,
         config=config,
-        agents=(agents_raw[0], agents_raw[1]),
+        agents=tuple(agents_raw),
         checkpoint=checkpoint,
         started_at=started_at,
     )
 
 
-def _move_record_from_json(row: object, expected_n: int) -> MoveRecord:
+def _move_record_from_json(row: object, expected_n: int, num_players: int) -> MoveRecord:
     if not isinstance(row, dict):
         raise RulesError(f"move record must be an object, got {type(row).__name__}")
     n = _int_field(row, "n")
     if n != expected_n:
         raise RulesError(f"move records out of order: expected n={expected_n}, got n={n}")
     player = _int_field(row, "player")
-    if player not in (0, 1):
-        raise RulesError(f"move {n}: field 'player' must be 0 or 1, got {player}")
+    if not 0 <= player < num_players:
+        raise RulesError(
+            f"move {n}: field 'player' must be in 0..{num_players - 1}, got {player}"
+        )
     tile = row.get("tile")
     if not isinstance(tile, str):
         raise RulesError(f"move {n}: field 'tile' must be a string, got {tile!r}")
@@ -258,20 +311,20 @@ def _move_record_from_json(row: object, expected_n: int) -> MoveRecord:
         player=player,
         tile=tile,
         move=move_from_json(row.get("move")),
-        score_after=_scores_field(row, "score_after"),
+        score_after=_scores_field(row, "score_after", num_players),
         annot=None if annot_raw is None else annot_from_json(annot_raw),
     )
 
 
-def _scores_field(d: dict[Any, Any], key: str) -> tuple[int, int]:
+def _scores_field(d: dict[Any, Any], key: str, num_players: int) -> tuple[int, ...]:
     v = d.get(key)
     if not (
         isinstance(v, list)
-        and len(v) == 2
+        and len(v) == num_players
         and all(isinstance(s, int) and not isinstance(s, bool) for s in v)
     ):
-        raise RulesError(f"field {key!r} must be a list of two ints, got {v!r}")
-    return (v[0], v[1])
+        raise RulesError(f"field {key!r} must be a list of {num_players} ints, got {v!r}")
+    return tuple(v)
 
 
 def _int_field(d: dict[Any, Any], key: str) -> int:

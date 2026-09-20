@@ -142,7 +142,7 @@ def create_app(
             "header": views.replay_header_view(replay.header),
             "moves": [views.move_record_view(r) for r in replay.moves],
             "final_scores": list(replay.final_scores),
-            "winner": replay.winner,
+            "winners": list(replay.winners),
             "states": states,
         }
 
@@ -191,13 +191,17 @@ def _list_replays(replays_dir: Path) -> list[dict[str, Any]]:
             continue
         if not (isinstance(header, dict) and isinstance(end, dict) and end.get("end") is True):
             continue
+        winners = end.get("winners")
+        if winners is None:  # v1 end line: single 'winner', null meant a two-way tie
+            w = end.get("winner")
+            winners = [0, 1] if w is None else [w]
         out.append(
             {
                 "name": path.name,
                 "agents": header.get("agents"),
                 "started_at": header.get("started_at"),
                 "final_scores": end.get("final_scores"),
-                "winner": end.get("winner"),
+                "winners": winners,
                 "turns": len(lines) - 2,
             }
         )

@@ -2,8 +2,8 @@
 // per-move AI search panel + whole-game win-probability chart on the right.
 //
 // Data source is the API exactly as produced by web/views.py:
-//   GET /api/replays          -> {replays: [{name, agents, started_at, final_scores, winner, turns}]}
-//   GET /api/replays/{name}   -> {header, moves, final_scores, winner, states}
+//   GET /api/replays          -> {replays: [{name, agents, started_at, final_scores, winners, turns}]}
+//   GET /api/replays/{name}   -> {header, moves, final_scores, winners, states}
 // `states` holds one entry per position: states[i] is the board BEFORE move i,
 // and states[moves.length] is the terminal position. moves[i] is applied to
 // states[i] to reach states[i+1].
@@ -99,8 +99,9 @@ async function api(path) {
 
 function describeReplay(m) {
   const agents = (m.agents ?? []).join(" vs ");
-  const fs = m.final_scores ? `${m.final_scores[0]}–${m.final_scores[1]}` : "?";
-  const win = m.winner === null || m.winner === undefined ? "draw" : `P${m.winner} won`;
+  const fs = m.final_scores ? m.final_scores.join("–") : "?";
+  const ws = m.winners ?? [];
+  const win = ws.length === 1 ? `P${ws[0]} won` : "draw";
   const when = (m.started_at ?? "").replace("T", " ").slice(0, 16);
   return `${agents} · ${when} · ${fs} · ${win}`;
 }

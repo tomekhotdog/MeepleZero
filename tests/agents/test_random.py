@@ -86,7 +86,7 @@ def test_play_game_writes_fully_verifiable_replay(tmp_path: Path) -> None:
     assert replay.header.agents == ("random", "random")
     assert replay.header.started_at == STARTED_AT
     assert replay.final_scores == result.final_scores
-    assert replay.winner == result.winner
+    assert replay.winners == ((0, 1) if result.winner is None else (result.winner,))
     assert len(replay.moves) == result.turns
 
     states = list(replay_states(replay))  # re-derives and verifies every move

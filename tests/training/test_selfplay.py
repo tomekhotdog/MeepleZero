@@ -58,7 +58,7 @@ def test_one_tiny_selfplay_game_populates_buffer_and_replay(tmp_path: Path) -> N
 
     # Sample and check target invariants + the value-sign rule against the replay.
     movers = {rec.n: rec.player for rec in replay.moves}
-    winner = replay.winner
+    winner = replay.winners[0] if len(replay.winners) == 1 else None
     batch = buf.sample(30, random.Random(0))
     seen: set[int] = set()
     for ex in batch:
