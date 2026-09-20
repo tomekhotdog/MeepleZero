@@ -54,7 +54,7 @@ class MoveRecord:
     player: Player
     tile: str
     move: Move
-    score_after: tuple[int, int]
+    score_after: tuple[int, ...]
     annot: Annot | None
 
 
@@ -62,7 +62,7 @@ class MoveRecord:
 class Replay:
     header: ReplayHeader
     moves: tuple[MoveRecord, ...]
-    final_scores: tuple[int, int]
+    final_scores: tuple[int, ...]
     winner: int | None  # 0 | 1 | None (draw)
 
 
@@ -92,7 +92,7 @@ class ReplayWriter:
         player: Player,
         tile: str,
         move: Move,
-        score_after: tuple[int, int],
+        score_after: tuple[int, ...],
         annot: Annot | None = None,
     ) -> None:
         self._write(
@@ -106,7 +106,7 @@ class ReplayWriter:
             }
         )
 
-    def finish(self, final_scores: tuple[int, int]) -> None:
+    def finish(self, final_scores: tuple[int, ...]) -> None:
         self._write(
             {
                 "end": True,
@@ -198,7 +198,7 @@ def replay_states(replay: Replay) -> Iterator[GameState]:
     yield state
 
 
-def _winner(scores: tuple[int, int]) -> int | None:
+def _winner(scores: tuple[int, ...]) -> int | None:
     if scores[0] == scores[1]:
         return None
     return 0 if scores[0] > scores[1] else 1

@@ -15,13 +15,16 @@ from carcassonne.core.engine import (
 from carcassonne.core.features import FeatureIndex, NodeId
 from carcassonne.core.state import empty_board_with_start
 from carcassonne.core.tiles import DECK, START_TILE_ID
-from carcassonne.core.types import FeatureKind, Player, Pos
+from carcassonne.core.types import FeatureKind, Player, Pos, RulesError
 
 _DEFAULT_CONFIG = GameConfig()
 
 
 def new_game(seed: int, config: GameConfig = _DEFAULT_CONFIG) -> GameState:
     """Fresh game: start D tile at (0,0) R0, deck shuffled by `seed`, first tile drawn."""
+    n = config.num_players
+    if not 2 <= n <= 5:
+        raise RulesError(f"num_players must be 2..5, got {n}")
     tiles = [
         t.id for t in DECK for _ in range(t.count - (1 if t.id == START_TILE_ID else 0))
     ]
@@ -36,10 +39,10 @@ def new_game(seed: int, config: GameConfig = _DEFAULT_CONFIG) -> GameState:
         deck=deck,
         current_tile=current,
         current_player=0,
-        scores=(0, 0),
-        meeples=(m, m),
-        abbots=(True, True),
-        abbot_at=(None, None),
+        scores=(0,) * n,
+        meeples=(m,) * n,
+        abbots=(True,) * n,
+        abbot_at=(None,) * n,
         discarded=discarded,
         last_events=(),
         turn=0,
@@ -50,12 +53,12 @@ def is_terminal(state: GameState) -> bool:
     return state.current_tile is None
 
 
-def final_scores(state: GameState) -> tuple[int, int]:
+def final_scores(state: GameState) -> tuple[int, ...]:
     """Live scores plus end-game value of every meepled feature. Pure; no events."""
     scores = list(state.scores)
     for player, points in _endgame_awards(state):
         scores[player] += points
-    return (scores[0], scores[1])
+    return tuple(scores)
 
 
 def endgame_potential(state: GameState, player: Player) -> int:

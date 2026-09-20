@@ -83,7 +83,7 @@ def play_selfplay_game(
     return game_id
 
 
-def _winner(scores: tuple[int, int]) -> int | None:
+def _winner(scores: tuple[int, ...]) -> int | None:
     if scores[0] == scores[1]:
         return None
     return 0 if scores[0] > scores[1] else 1

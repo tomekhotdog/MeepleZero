@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum, IntEnum
 
-type Player = int  # 0 | 1
+type Player = int  # 0..num_players-1 (seat index)
 
 
 class Side(IntEnum):

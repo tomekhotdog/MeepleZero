@@ -23,7 +23,7 @@ _RNG_SALT = 0x5EED  # agents' rng stream must differ from the deck-shuffle seed
 
 @dataclass(frozen=True, slots=True)
 class GameResult:
-    final_scores: tuple[int, int]
+    final_scores: tuple[int, ...]
     winner: int | None  # 0 | 1 | None (draw)
     turns: int
     replay_path: Path | None
@@ -79,7 +79,7 @@ def play_game(
     return GameResult(final_scores=finals, winner=_winner(finals), turns=n, replay_path=path)
 
 
-def _winner(scores: tuple[int, int]) -> int | None:
+def _winner(scores: tuple[int, ...]) -> int | None:
     if scores[0] == scores[1]:
         return None
     return 0 if scores[0] > scores[1] else 1

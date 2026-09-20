@@ -34,10 +34,10 @@ class GameState:
     deck: tuple[str, ...]            # remaining tile type ids, pre-shuffled
     current_tile: str | None         # None <=> terminal
     current_player: Player
-    scores: tuple[int, int]
-    meeples: tuple[int, int]         # plain meeples in supply (start: 7, 7)
-    abbots: tuple[bool, bool]        # abbot in supply?
-    abbot_at: tuple[NodeId | None, NodeId | None]
+    scores: tuple[int, ...]
+    meeples: tuple[int, ...]         # plain meeples in supply (7 per seat at start)
+    abbots: tuple[bool, ...]         # abbot in supply?
+    abbot_at: tuple[NodeId | None, ...]
     discarded: tuple[str, ...]       # unplaceable tiles set aside
     last_events: tuple[ScoreEvent, ...]
     turn: int
@@ -161,11 +161,11 @@ def apply(state: GameState, move: Move) -> GameState:
         features=idx,
         deck=deck,
         current_tile=current,
-        current_player=1 - p,
-        scores=(scores[0], scores[1]),
-        meeples=(meeples[0], meeples[1]),
-        abbots=(abbots[0], abbots[1]),
-        abbot_at=(abbot_at[0], abbot_at[1]),
+        current_player=(p + 1) % len(state.scores),
+        scores=tuple(scores),
+        meeples=tuple(meeples),
+        abbots=tuple(abbots),
+        abbot_at=tuple(abbot_at),
         discarded=state.discarded + set_aside,
         last_events=tuple(events),
         turn=state.turn + 1,

@@ -1,10 +1,13 @@
 import random
 
+import pytest
+
+from carcassonne.core.config import GameConfig
 from carcassonne.core.engine import GameState, apply, legal_moves
 from carcassonne.core.features import FeatureIndex, Meeple, NodeId
 from carcassonne.core.game import final_scores, is_terminal, new_game
 from carcassonne.core.state import Board, PlacedTile
-from carcassonne.core.types import MeepleKind, Pos, Rotation
+from carcassonne.core.types import MeepleKind, Pos, Rotation, RulesError
 
 
 def _build(*tiles: tuple[Pos, str, Rotation]) -> tuple[Board, FeatureIndex]:
@@ -114,3 +117,21 @@ def test_final_scores_without_meeples_is_identity() -> None:
     board, idx = _build((Pos(0, 0), "D", Rotation.R0))
     state = _state(board, idx, scores=(5, 9))
     assert final_scores(state) == (5, 9)
+
+
+def test_new_game_sizes_per_player_state() -> None:
+    state = new_game(0, GameConfig(num_players=4))
+    assert state.scores == (0, 0, 0, 0)
+    assert state.meeples == (7, 7, 7, 7)
+    assert state.abbots == (True, True, True, True)
+    assert state.abbot_at == (None, None, None, None)
+
+
+def test_new_game_default_is_two_players() -> None:
+    assert new_game(0).scores == (0, 0)
+
+
+@pytest.mark.parametrize("n", [0, 1, 6])
+def test_new_game_rejects_bad_player_count(n: int) -> None:
+    with pytest.raises(RulesError):
+        new_game(0, GameConfig(num_players=n))
