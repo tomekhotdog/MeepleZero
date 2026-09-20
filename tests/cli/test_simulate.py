@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -92,6 +93,17 @@ def test_simulate_four_players_with_agents_flag(
     list(replay_states(replay))
     out = capsys.readouterr().out
     assert "winners=" in out and "summary:" in out
+    # Tally conservation: each game is classified exactly once — as one seat's
+    # win or as shared — so a tie double-counted as a win cannot slip through.
+    wins = [int(x) for x in re.findall(r"wins=(\d+)", out)]
+    shared_m = re.search(r"shared=(\d+)", out)
+    assert shared_m is not None and len(wins) == 4
+    assert sum(wins) + int(shared_m.group(1)) == 1  # exactly one game played
+    winners = replay.winners
+    if len(winners) == 1:
+        assert wins[winners[0]] == 1  # the replay's sole winner got the tally
+    else:
+        assert shared_m.group(1) == "1"
 
 
 def test_simulate_rejects_both_agent_styles(tmp_path: Path) -> None:
