@@ -1,5 +1,10 @@
 # Multiplayer Engine (2-5 Players) Implementation Plan
 
+> **⚠️ ORCHESTRATED BY THE MEGA PLAN — do not execute this file standalone.**
+> Task order, dependencies, and merge deltas live in
+> `docs/plans/2026-09-20-mega-plan.md` (this plan's tasks are referenced there
+> as MP-T1…MP-T10; **MP-T4 is dissolved** into the mega plan's M8/M10).
+
 > **For Claude:** REQUIRED SUB-SKILL: Use tomek-superpowers:build to implement this plan task-by-task.
 
 > ⚠️ **DO NOT START while another session is active on this repo.**

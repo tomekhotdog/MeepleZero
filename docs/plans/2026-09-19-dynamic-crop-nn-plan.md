@@ -1,5 +1,12 @@
 # Dynamic-Crop NN Representation & Training Throughput — Implementation Plan
 
+> **⚠️ ORCHESTRATED BY THE MEGA PLAN — do not execute this file standalone.**
+> Task order, dependencies, and merge deltas live in
+> `docs/plans/2026-09-20-mega-plan.md` (this plan's tasks are referenced there
+> as DC-T1…DC-T10). The mega plan runs the multiplayer engine widening FIRST,
+> so this plan's "targets the 2-player engine" caveat is resolved by its
+> M8/M10 deltas (2-player guards folded into the encoder and MctsAgent).
+
 > **For Claude:** REQUIRED SUB-SKILL: Use tomek-superpowers:build to implement this plan task-by-task.
 
 **Goal:** Replace the fixed 31×31 window with a per-state dynamic Crop, shrink the net to a fully-convolutional ~190k params, key actions by world coordinates, and parallelise self-play — ≥5× single-process throughput, ~linear 4-worker scaling.
