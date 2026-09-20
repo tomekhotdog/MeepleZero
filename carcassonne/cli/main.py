@@ -10,7 +10,8 @@ from collections.abc import Callable
 from pathlib import Path
 
 from carcassonne.agents import make_agent
-from carcassonne.game.arena import run_match, winner_2p
+from carcassonne.core import GameConfig
+from carcassonne.game.arena import run_match
 from carcassonne.game.match import play_game
 
 
@@ -32,8 +33,12 @@ def _build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     sim = sub.add_parser("simulate", help="play agent-vs-agent games, writing replays")
-    sim.add_argument("--p0", required=True, help="agent spec for player 0 (e.g. 'random')")
-    sim.add_argument("--p1", required=True, help="agent spec for player 1 (e.g. 'random')")
+    sim.add_argument("--p0", help="agent spec for player 0 (2-player shorthand)")
+    sim.add_argument("--p1", help="agent spec for player 1 (2-player shorthand)")
+    sim.add_argument(
+        "--agents",
+        help="comma-separated agent specs for all seats, 2-5 (e.g. 'greedy,random,random')",
+    )
     sim.add_argument("--seed", type=int, required=True, help="seed of game 0; game i uses seed+i")
     sim.add_argument("--out", type=Path, default=None, help="directory for replay files")
     sim.add_argument("--games", type=int, default=1, help="number of games (default 1)")
@@ -95,21 +100,35 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _simulate(args: argparse.Namespace) -> int:
+    if args.agents and (args.p0 or args.p1):
+        print("error: use either --agents or --p0/--p1, not both", file=sys.stderr)
+        return 2
+    if args.agents:
+        specs = [s.strip() for s in args.agents.split(",")]
+    elif args.p0 and args.p1:
+        specs = [args.p0, args.p1]
+    else:
+        print("error: pass --agents, or both --p0 and --p1", file=sys.stderr)
+        return 2
+    if not 2 <= len(specs) <= 5:
+        print(f"error: need 2-5 agents, got {len(specs)}", file=sys.stderr)
+        return 2
     try:
-        agents = (make_agent(args.p0), make_agent(args.p1))
+        agents = tuple(make_agent(s) for s in specs)
     except ValueError as e:
         print(f"error: {e}", file=sys.stderr)
         return 2
+    config = GameConfig(num_players=len(agents))
     replay_dir: Path | None = None if args.no_replay else args.out
     if replay_dir is None and not args.no_replay:
         print("error: --out is required unless --no-replay is given", file=sys.stderr)
         return 2
 
-    wins = [0, 0]
+    wins = [0] * len(agents)
     draws = 0
     for i in range(args.games):
         seed = args.seed + i
-        result = play_game(agents, seed, replay_dir=replay_dir)
+        result = play_game(agents, seed, replay_dir=replay_dir, config=config)
         line = (
             f"game {i}: seed={seed} scores={result.final_scores}"
             f" winners={list(result.winners)} turns={result.turns}"
@@ -117,14 +136,14 @@ def _simulate(args: argparse.Namespace) -> int:
         if result.replay_path is not None:
             line += f" replay={result.replay_path}"
         print(line)
-        w = winner_2p(result.winners)
-        if w is None:
+        if len(result.winners) > 1:
             draws += 1
         else:
-            wins[w] += 1
+            wins[result.winners[0]] += 1
     print(
-        f"summary: p0[{agents[0].name}] wins={wins[0]}"
-        f" p1[{agents[1].name}] wins={wins[1]} draws={draws}"
+        "summary: "
+        + " ".join(f"p{i}[{a.name}] wins={wins[i]}" for i, a in enumerate(agents))
+        + f" shared={draws}"
     )
     return 0
 

@@ -70,6 +70,50 @@ def test_simulate_no_replay_writes_nothing(
     assert "replay=" not in out
 
 
+def test_simulate_four_players_with_agents_flag(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    rc = main(
+        [
+            "simulate",
+            "--agents",
+            "greedy,random,random,random",
+            "--seed",
+            "5",
+            "--out",
+            str(tmp_path),
+        ]
+    )
+    assert rc == 0
+    (path,) = tmp_path.glob("*.jsonl")
+    replay = load_replay(path)
+    assert replay.header.agents == ("greedy", "random", "random", "random")
+    assert replay.header.config.num_players == 4
+    list(replay_states(replay))
+    out = capsys.readouterr().out
+    assert "winners=" in out and "summary:" in out
+
+
+def test_simulate_rejects_both_agent_styles(tmp_path: Path) -> None:
+    rc = main(
+        [
+            "simulate",
+            "--agents",
+            "random,random",
+            "--p0",
+            "random",
+            "--p1",
+            "random",
+            "--seed",
+            "1",
+            "--no-replay",
+            "--out",
+            str(tmp_path),
+        ]
+    )
+    assert rc != 0
+
+
 def test_unknown_agent_spec_fails_without_traceback(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
