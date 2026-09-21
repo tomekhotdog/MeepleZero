@@ -243,7 +243,7 @@ def _bench(args: argparse.Namespace) -> int:
         run = TrainingRun.create(Path(td) / "bench", {"bench": True})
         t0 = time.perf_counter()
         for i in range(args.games):
-            # returned (game_id, examples) ignored: bench only times generation.
+            # returned (game_id, replay_path, examples) ignored: bench only times generation.
             play_selfplay_game(
                 net=net,
                 device=device,

@@ -39,10 +39,12 @@ def play_selfplay_game(
     mcts_config: MctsConfig,
     game_id: str,
     started_at: str,
-) -> tuple[str, list[Example]]:
+) -> tuple[str, str, list[Example]]:
     """Play one MctsAgent-vs-itself game; write its replay into ``run.replays_dir``
-    and return ``(game_id, examples)``. The caller owns buffer insertion -- this
-    is the single-game worker, usable from the multiprocess pool."""
+    and return ``(game_id, replay_path, examples)``. The caller owns buffer
+    insertion -- this is the single-game worker, usable from the multiprocess
+    pool. The replay filename convention is private to this function: callers
+    must use the returned path, never re-derive it."""
     config = GameConfig()
     agent = MctsAgent(net, device, mcts_config, self_play=True)
     ctx = TurnContext(rng=random.Random(seed), annotate=True)
@@ -79,7 +81,7 @@ def play_selfplay_game(
         Example(move_n=move_n, policy=sparse, value=_value_for(mover, winner))
         for move_n, sparse, mover in pending
     ]
-    return game_id, examples
+    return game_id, str(replay_path), examples
 
 
 def _winner(scores: tuple[int, ...]) -> int | None:

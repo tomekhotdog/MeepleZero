@@ -173,7 +173,7 @@ def train(
                 for _ in range(cfg.selfplay_games_per_iter):
                     started_at = datetime.now(UTC).isoformat(timespec="seconds")
                     game_id = f"g{order_key:020d}"
-                    _, examples = play_selfplay_game(
+                    _, replay_path, examples = play_selfplay_game(
                         net=best_net,
                         device=device,
                         seed=cfg.seed + game_counter,
@@ -182,9 +182,7 @@ def train(
                         game_id=game_id,
                         started_at=started_at,
                     )
-                    buffer.add_game(
-                        game_id, str(run.replays_dir / f"{game_id}.jsonl"), examples, order_key
-                    )
+                    buffer.add_game(game_id, replay_path, examples, order_key)
                     order_key += 1
                     game_counter += 1
                 buffer.evict_to(cfg.window_games)

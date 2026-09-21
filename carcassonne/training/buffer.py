@@ -173,6 +173,11 @@ def _policy_to_json(policy: dict[Key, float]) -> str:
 def _policy_from_json(raw: str) -> dict[Key, float]:
     out: dict[Key, float] = {}
     for ks, v in json.loads(raw).items():
-        x, y, rot, a = (int(t) for t in ks.split(","))
+        try:
+            x, y, rot, a = (int(t) for t in ks.split(","))
+        except ValueError as e:
+            # Self-produced format, so this only fires on on-disk corruption —
+            # name the key so the bad row is triageable.
+            raise ValueError(f"malformed policy key {ks!r}") from e
         out[(x, y, rot, a)] = float(v)
     return out

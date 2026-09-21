@@ -30,7 +30,7 @@ def _tiny_net() -> CarcassonneNet:
 def test_one_tiny_selfplay_game_returns_examples_and_replay(tmp_path: Path) -> None:
     run = TrainingRun.create(tmp_path / "run", config={"note": "test"})
 
-    game_id, examples = play_selfplay_game(
+    game_id, replay_path_str, examples = play_selfplay_game(
         net=_tiny_net(),
         device=DEVICE,
         seed=1,
@@ -41,8 +41,10 @@ def test_one_tiny_selfplay_game_returns_examples_and_replay(tmp_path: Path) -> N
     )
     assert game_id == "game0"
 
-    # Replay was written and verifies end-to-end through the rules core.
-    replay_path = run.replays_dir / "game0.jsonl"
+    # Replay was written where the worker says it was, and verifies end-to-end
+    # through the rules core (callers use the returned path, never re-derive).
+    replay_path = Path(replay_path_str)
+    assert replay_path.parent == run.replays_dir
     replay = load_replay(replay_path)
     states = list(replay_states(replay))  # raises if any record desyncs
     n_moves = len(replay.moves)
