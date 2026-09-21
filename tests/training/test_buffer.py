@@ -11,18 +11,26 @@ import pytest
 from carcassonne.agents import RandomAgent
 from carcassonne.game.match import play_game
 from carcassonne.game.replay import load_replay, replay_states
-from carcassonne.nn.actions import ACTION_SPACE
 from carcassonne.training.buffer import Example, ReplayBuffer, SampledExample
 
 
 def _example(move_n: int, value: float) -> Example:
-    # sparse policy over two valid action ids, summing to 1.
-    return Example(move_n=move_n, policy={5: 0.25, 6: 0.75}, value=value)
+    # sparse policy over two world-coordinate keys, summing to 1.
+    return Example(
+        move_n=move_n, policy={(0, 1, 0, 0): 0.25, (-1, 0, 2, 5): 0.75}, value=value
+    )
 
 
 def _populate(buf: ReplayBuffer) -> None:
     buf.add_game("g0", "replays/g0.jsonl", [_example(0, 1.0), _example(1, -1.0)], order_key=0)
     buf.add_game("g1", "replays/g1.jsonl", [_example(0, 0.0)], order_key=1)
+
+
+def test_policy_json_world_keys_roundtrip() -> None:
+    from carcassonne.training.buffer import _policy_from_json, _policy_to_json
+
+    policy = {(3, -2, 1, 0): 0.75, (0, 0, 3, 13): 0.25}
+    assert _policy_from_json(_policy_to_json(policy)) == policy
 
 
 def test_add_len_and_sample(tmp_path: Path) -> None:
@@ -38,9 +46,9 @@ def test_add_len_and_sample(tmp_path: Path) -> None:
         assert ex.policy  # non-empty sparse dict
         assert sum(ex.policy.values()) == pytest.approx(1.0)
         assert ex.value in (-1.0, 0.0, 1.0)
-        for action_id in ex.policy:
-            assert isinstance(action_id, int)
-            assert 0 <= action_id < ACTION_SPACE
+        for key in ex.policy:
+            assert isinstance(key, tuple) and len(key) == 4
+            assert all(isinstance(t, int) for t in key)
 
     # deterministic for a given seed + buffer contents
     assert buf.sample(20, random.Random(0)) == buf.sample(20, random.Random(0))

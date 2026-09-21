@@ -10,7 +10,8 @@ and leans on engine determinism -- the same idea the replay format is built on.
 Perspective: ``value`` is the game outcome from the perspective of the player to
 move at that position (+1 win / -1 loss / 0 draw), matching the value head and
 :func:`carcassonne.agents.mcts._terminal_value`. ``policy`` is the MCTS visit
-distribution as a sparse ``{action_id: prob}`` map over the action space.
+distribution as a sparse ``{(x, y, rot, a): prob}`` map over world-coordinate
+keys (see :mod:`carcassonne.nn.actions`) -- stable under any crop.
 
 No wall-clock and no global RNG live here: ``order_key`` (recency, for eviction)
 is passed in by the caller, and :meth:`sample` takes an explicit ``random.Random``
@@ -28,6 +29,7 @@ from pathlib import Path
 
 from carcassonne.core import GameState
 from carcassonne.game.replay import load_replay, replay_states
+from carcassonne.nn.actions import Key
 
 
 @dataclass(frozen=True)
@@ -35,7 +37,7 @@ class Example:
     """One training example: a move's visit-policy target and value target."""
 
     move_n: int
-    policy: dict[int, float]  # sparse {action_id: prob}, sums to ~1 over legal
+    policy: dict[Key, float]  # sparse {(x, y, rot, a): prob}, sums to ~1 over legal
     value: float  # +1 / -1 / 0 from this position's mover's perspective
 
 
@@ -45,7 +47,7 @@ class SampledExample:
 
     game_id: str
     move_n: int
-    policy: dict[int, float]
+    policy: dict[Key, float]
     value: float
 
 
@@ -162,9 +164,15 @@ class ReplayBuffer:
         self._conn.close()
 
 
-def _policy_to_json(policy: dict[int, float]) -> str:
-    return json.dumps({str(k): v for k, v in policy.items()}, separators=(",", ":"))
+def _policy_to_json(policy: dict[Key, float]) -> str:
+    return json.dumps(
+        {",".join(map(str, k)): v for k, v in policy.items()}, separators=(",", ":")
+    )
 
 
-def _policy_from_json(raw: str) -> dict[int, float]:
-    return {int(k): float(v) for k, v in json.loads(raw).items()}
+def _policy_from_json(raw: str) -> dict[Key, float]:
+    out: dict[Key, float] = {}
+    for ks, v in json.loads(raw).items():
+        x, y, rot, a = (int(t) for t in ks.split(","))
+        out[(x, y, rot, a)] = float(v)
+    return out

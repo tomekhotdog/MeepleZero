@@ -243,6 +243,7 @@ def _bench(args: argparse.Namespace) -> int:
         run = TrainingRun.create(Path(td) / "bench", {"bench": True})
         t0 = time.perf_counter()
         for i in range(args.games):
+            # returned (game_id, examples) ignored: bench only times generation.
             play_selfplay_game(
                 net=net,
                 device=device,
@@ -251,8 +252,6 @@ def _bench(args: argparse.Namespace) -> int:
                 mcts_config=MctsConfig(sims=args.sims),
                 game_id=f"bench{i:04d}",
                 started_at="bench",
-                order_key=i,
-                buffer=None,
             )
         dt = time.perf_counter() - t0
     print(f"params={param_count(net)}")

@@ -13,7 +13,7 @@ from carcassonne.agents.mcts import MctsAgent, MctsConfig
 from carcassonne.core import legal_moves, new_game
 from carcassonne.game.agent import TurnContext
 from carcassonne.game.replay import load_replay, replay_states
-from carcassonne.nn.actions import ACTION_SPACE, encode_move
+from carcassonne.nn.actions import key_move, move_key
 from carcassonne.nn.model import CarcassonneNet
 from carcassonne.training.buffer import ReplayBuffer
 from carcassonne.training.run import TrainingRun
@@ -27,11 +27,10 @@ def _tiny_net() -> CarcassonneNet:
     return CarcassonneNet(channels=8, n_blocks=1)
 
 
-def test_one_tiny_selfplay_game_populates_buffer_and_replay(tmp_path: Path) -> None:
+def test_one_tiny_selfplay_game_returns_examples_and_replay(tmp_path: Path) -> None:
     run = TrainingRun.create(tmp_path / "run", config={"note": "test"})
-    buf = ReplayBuffer(run.buffer_path)
 
-    game_id = play_selfplay_game(
+    game_id, examples = play_selfplay_game(
         net=_tiny_net(),
         device=DEVICE,
         seed=1,
@@ -39,8 +38,6 @@ def test_one_tiny_selfplay_game_populates_buffer_and_replay(tmp_path: Path) -> N
         mcts_config=MctsConfig(sims=4),
         game_id="game0",
         started_at="2026-08-22T00:00:00+00:00",
-        order_key=0,
-        buffer=buf,
     )
     assert game_id == "game0"
 
@@ -52,7 +49,20 @@ def test_one_tiny_selfplay_game_populates_buffer_and_replay(tmp_path: Path) -> N
     assert n_moves > 0
     assert len(states) == n_moves + 1  # a state before each move, then terminal
 
-    # Buffer holds exactly one example per move.
+    # One example per move; every policy key is a world-coordinate 4-tuple.
+    assert len(examples) == n_moves
+    assert all(
+        isinstance(k, tuple) and len(k) == 4 for ex in examples for k in ex.policy
+    )
+    # Keys are the engine's own coordinates: each decodes to a legal move of the
+    # state it was recorded at.
+    for ex in examples:
+        legal_keys = {move_key(m) for m in legal_moves(states[ex.move_n])}
+        assert set(ex.policy) <= legal_keys
+
+    # Buffer insertion is the caller's job now; add and check round-trip.
+    buf = ReplayBuffer(run.buffer_path)
+    buf.add_game(game_id, str(replay_path), examples, order_key=0)
     assert buf.n_games() == 1
     assert len(buf) == n_moves
 
@@ -63,8 +73,6 @@ def test_one_tiny_selfplay_game_populates_buffer_and_replay(tmp_path: Path) -> N
     seen: set[int] = set()
     for ex in batch:
         assert sum(ex.policy.values()) == pytest.approx(1.0)
-        for action_id in ex.policy:
-            assert 0 <= action_id < ACTION_SPACE
         expected = 0.0 if winner is None else (1.0 if movers[ex.move_n] == winner else -1.0)
         assert ex.value == expected
         seen.add(ex.move_n)
@@ -83,5 +91,5 @@ def test_choose_with_policy_single_search_matches_chosen_move() -> None:
     # eval-mode pick is the visit-argmax, so it must be the policy's argmax.
     assert move == max(policy, key=lambda m: policy[m])
     assert annot.sims == 4
-    # every policy move encodes into the action space (self-play stores these ids).
-    assert all(0 <= encode_move(state, m) < ACTION_SPACE for m in policy)
+    # every policy move round-trips through the world-key codec (self-play stores keys).
+    assert all(key_move(move_key(m)) == m for m in policy)

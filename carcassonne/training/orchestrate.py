@@ -172,16 +172,18 @@ def train(
                 # -- self-play (best net) -----------------------------------
                 for _ in range(cfg.selfplay_games_per_iter):
                     started_at = datetime.now(UTC).isoformat(timespec="seconds")
-                    play_selfplay_game(
+                    game_id = f"g{order_key:020d}"
+                    _, examples = play_selfplay_game(
                         net=best_net,
                         device=device,
                         seed=cfg.seed + game_counter,
                         run=run,
                         mcts_config=gate_cfg,
-                        game_id=f"g{order_key:020d}",
+                        game_id=game_id,
                         started_at=started_at,
-                        order_key=order_key,
-                        buffer=buffer,
+                    )
+                    buffer.add_game(
+                        game_id, str(run.replays_dir / f"{game_id}.jsonl"), examples, order_key
                     )
                     order_key += 1
                     game_counter += 1
