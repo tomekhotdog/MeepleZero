@@ -10,6 +10,7 @@ from __future__ import annotations
 import random
 from dataclasses import replace
 
+import numpy as np
 import pytest
 import torch
 
@@ -22,6 +23,7 @@ from carcassonne.core import (
     Pos,
     Rotation,
     RulesError,
+    apply,
     is_terminal,
     legal_moves,
     new_game,
@@ -261,3 +263,45 @@ def test_mcts_plays_legal_games_to_completion() -> None:
     for game in result.results:
         assert game.turns > 0
         assert all(s >= 0 for s in game.final_scores)  # completed with real scores
+
+
+# ---------------------------------------------------------------------------
+# Subtree reuse: apply() draws from the in-state deck, so the child reached by the
+# committed move IS the next real state -- reusing it is exact, not approximate.
+
+
+def test_tree_reuse_carries_visits_across_moves() -> None:
+    net = _net()
+    agent = MctsAgent(net, DEVICE, MctsConfig(sims=8, reuse_tree=True))
+    state = new_game(0, GameConfig())
+    ctx = TurnContext(rng=random.Random(0), annotate=False)
+    move, _ = agent.choose(state, ctx)
+    stash = agent._stash  # noqa: SLF001
+    assert stash is not None  # subtree kept for the next ply
+    nxt = apply(state, move)
+    if not is_terminal(nxt):
+        inherited = int(stash.n.sum())
+        root = agent._search(nxt, np.random.default_rng(0), add_noise=False)  # noqa: SLF001
+        assert root is stash  # the committed child became the new root
+        assert int(root.n.sum()) == inherited + 8  # inherited visits + this search's sims
+
+
+def test_tree_reuse_misses_on_unrelated_state() -> None:
+    net = _net()
+    agent = MctsAgent(net, DEVICE, MctsConfig(sims=4, reuse_tree=True))
+    ctx = TurnContext(rng=random.Random(0), annotate=False)
+    agent.choose(new_game(0, GameConfig()), ctx)
+    # A different game must not match the stash -- fresh root, no crash.
+    move, _ = agent.choose(new_game(99, GameConfig()), ctx)
+    assert move in legal_moves(new_game(99, GameConfig()))
+
+
+def test_reuse_off_matches_old_behaviour() -> None:
+    net = _net()
+    cfg = MctsConfig(sims=8, reuse_tree=False)
+    a1 = MctsAgent(net, DEVICE, cfg)
+    a2 = MctsAgent(net, DEVICE, cfg)
+    state = new_game(3, GameConfig())
+    m1, _ = a1.choose(state, TurnContext(rng=random.Random(1), annotate=False))
+    m2, _ = a2.choose(state, TurnContext(rng=random.Random(1), annotate=False))
+    assert m1 == m2  # stateless determinism preserved when reuse is off

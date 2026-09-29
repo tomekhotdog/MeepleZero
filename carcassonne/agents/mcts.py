@@ -63,6 +63,7 @@ class MctsConfig:
     noise_frac: float = 0.25
     temp_turns: int = 12  # sample with temperature while turn < this, then argmax
     temp: float = 1.0
+    reuse_tree: bool = True  # carry the committed child's subtree into the next search
 
 
 _DEFAULT_CONFIG = MctsConfig()  # shared immutable default (frozen dataclass)
@@ -133,6 +134,7 @@ class MctsAgent:
         self._config = config
         self._self_play = self_play
         self.name = name
+        self._stash: _Node | None = None  # committed child's subtree, for the next ply
 
     # -- Agent protocol -----------------------------------------------------
 
@@ -144,6 +146,7 @@ class MctsAgent:
 
         move_idx = self._pick_move(root, state.turn, rng)
         move = root.moves[move_idx]
+        self._stash = root.children.get(move_idx)
         if not ctx.annotate:
             return move, None
 
@@ -164,7 +167,9 @@ class MctsAgent:
         start = time.perf_counter()
         rng = np.random.default_rng(ctx.rng.getrandbits(64))
         root = self._search(state, rng, add_noise=self._self_play)
-        move = root.moves[self._pick_move(root, state.turn, rng)]
+        move_idx = self._pick_move(root, state.turn, rng)
+        move = root.moves[move_idx]
+        self._stash = root.children.get(move_idx)
         think_ms = int((time.perf_counter() - start) * 1000)
         return move, self._annotate(root, think_ms), self._visit_dist(root)
 
@@ -176,7 +181,8 @@ class MctsAgent:
         and the ``/hint`` source. Noise-free and deterministic (search uses no
         randomness of its own), so it needs no rng."""
         _require_two_players(state)
-        return self._visit_dist(self._search(state, rng=None, add_noise=False))
+        # reuse=False: a hint must neither consume nor depend on the play stash.
+        return self._visit_dist(self._search(state, rng=None, add_noise=False, reuse=False))
 
     @staticmethod
     def _visit_dist(root: _Node) -> dict[Move, float]:
@@ -186,9 +192,22 @@ class MctsAgent:
     # -- internals ----------------------------------------------------------
 
     def _search(
-        self, root_state: GameState, rng: np.random.Generator | None, add_noise: bool
+        self,
+        root_state: GameState,
+        rng: np.random.Generator | None,
+        add_noise: bool,
+        reuse: bool = True,
     ) -> _Node:
-        root = self._make_node(root_state)
+        """Run ``sims`` simulations from ``root_state`` and return the root.
+
+        With subtree reuse the root may be last move's committed child: it keeps
+        its inherited visit counts, which therefore flow into the policy target
+        (standard AlphaZero subtree reuse). A reused root still gets fresh
+        Dirichlet noise; its priors are clean because only non-root nodes are
+        ever stashed, and noise is only ever mixed into the search root."""
+        root = self._take_stash(root_state) if reuse and self._config.reuse_tree else None
+        if root is None:
+            root = self._make_node(root_state)
         if root.terminal:
             raise ValueError("cannot search a terminal state: no legal moves")
         if add_noise:
@@ -197,6 +216,25 @@ class MctsAgent:
         for _ in range(self._config.sims):
             self._simulate(root)
         return root
+
+    def _take_stash(self, state: GameState) -> _Node | None:
+        """Consume the stashed subtree if it matches ``state``.
+
+        The stash is the child we committed last move. In self-play (one agent,
+        both seats) it matches directly; in arena/web play the opponent moved
+        once since, so also check the stash's children (one ply deeper). apply()
+        draws from the in-state deck, so a matching state is the exact node.
+        The stash is always cleared, so a stale one from a finished game is inert.
+        """
+        stash, self._stash = self._stash, None
+        if stash is None:
+            return None
+        if not stash.terminal and stash.state == state:
+            return stash
+        for child in stash.children.values():
+            if not child.terminal and child.state == state:
+                return child
+        return None
 
     def _make_node(self, state: GameState) -> _Node:
         """Create (and evaluate) a node. Terminal states are grounded; others get

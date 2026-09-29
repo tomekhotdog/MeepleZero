@@ -76,9 +76,11 @@ def make_checkpoint_agent(spec: str) -> Agent:
     except Exception as e:  # noqa: BLE001 -- torch.load raises assorted errors
         raise ValueError(f"failed to load checkpoint {path.name!r}: {e}") from e
     net = payload["net"]
-    agent = MctsAgent(
-        net, device, config=MctsConfig(sims=PLAY_SIMS), self_play=False, name=path.stem
-    )
+    # Interactive play disables subtree reuse: hints must not perturb the game, and
+    # visits == sims in the Prior-vs-Visits view. Training/arena build MctsAgent
+    # directly and keep reuse on.
+    config = MctsConfig(sims=PLAY_SIMS, reuse_tree=False)
+    agent = MctsAgent(net, device, config=config, self_play=False, name=path.stem)
     return agent
 
 

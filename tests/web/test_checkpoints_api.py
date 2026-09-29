@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import torch
 from fastapi.testclient import TestClient
 
 from carcassonne.agents import checkpoints
@@ -94,10 +95,20 @@ def test_hint_on_checkpoint_game_is_real_search(client: TestClient) -> None:
     assert max(entry["visits"] for entry in top) > 0  # real search, not priors only
 
 
-def test_repeated_hints_do_not_perturb_checkpoint_game(client: TestClient) -> None:
+def test_repeated_hints_do_not_perturb_checkpoint_game(
+    client: TestClient, checkpoints_dir: Path
+) -> None:
     """Hints use a throwaway rng, so spamming them cannot change the trajectory.
 
-    A hinted game and a clean game on the same seed must play identically."""
+    A hinted game and a clean game on the same seed must play identically.
+
+    The net is re-seeded here so the test doesn't depend on global torch RNG state.
+    Seed 122 is one where MCTS subtree reuse *does* let a hint's search tree leak
+    into the AI's next reply, so this fails reliably if checkpoint agents re-enable
+    ``reuse_tree``. Agents load the checkpoint at game creation, so overwriting it
+    before ``create()`` takes effect."""
+    torch.manual_seed(122)
+    ckpt_io.save(checkpoints_dir, step=0, net=CarcassonneNet(channels=8, n_blocks=1))
 
     def create() -> str:
         r = client.post(
