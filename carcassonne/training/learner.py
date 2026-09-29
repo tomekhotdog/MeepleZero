@@ -18,13 +18,16 @@ Two correctness cruxes live here:
   MCTS-visited actions -- which are never masked -- so this is both safe and
   exactly the cross entropy over the target's support.
 
-* **D4 policy augmentation, correctness by construction.** Rather than deriving
-  action-id index math by hand, we *resample the target through the engine*: for
-  a randomly chosen number of 90-degree rotations ``k in {0,1,2,3}`` we build the
-  genuinely rotated :class:`GameState` (:func:`rotate_state_90`), encode *that*,
-  and remap every visited action id via ``decode_move(state) -> rotate the Move
-  -> encode_move(rotated_state)``. The value target is rotation-invariant. This
-  guarantees the augmented (planes, policy, mask) triple is self-consistent.
+* **D4 policy augmentation over padded dynamic-crop batches.** For a randomly
+  chosen number of 90-degree rotations ``k in {0,1,2,3}`` we build the genuinely
+  rotated :class:`GameState` (:func:`rotate_state_90` -- the source of truth for
+  rotating *planes*) and rotate every world-coordinate policy Key arithmetically
+  via :func:`rotate_key` (cell ``(x, y) -> (y, -x)``, tile rotation +1) -- the
+  two transforms are verified to agree in tests. Rotation happens BEFORE the
+  batch is padded: a rotated crop swaps h/w, so the padded geometry is the max
+  over the *rotated* crops. The value target is rotation-invariant. There is no
+  out-of-window fallback any more -- a rotated crop always contains its own
+  legal moves, so a :class:`RulesError` here is a real bug and must surface.
   Reflections are intentionally excluded: base-game tiles are chiral, so a
   mirrored board is generally not a legal Carcassonne position (see module note).
 """
@@ -44,16 +47,16 @@ from numpy.typing import NDArray
 from carcassonne.core.engine import GameState
 from carcassonne.core.features import FeatureIndex, Meeple
 from carcassonne.core.state import Board, PlacedTile
-from carcassonne.core.types import Move, Pos, Rotation, RulesError
+from carcassonne.core.types import Move, Pos, Rotation
 from carcassonne.nn import checkpoint
-from carcassonne.nn.actions import ACTION_SPACE, decode_move, encode_move, legal_mask
-from carcassonne.nn.encode import NUM_PLANES, encode_state
+from carcassonne.nn.actions import ACTIONS_PER_CELL, Crop, Key, flat_index, legal_mask, rotate_key
+from carcassonne.nn.encode import NUM_PLANES, encode_state, valid_mask
 from carcassonne.nn.model import CarcassonneNet
 from carcassonne.training.buffer import ReplayBuffer, SampledExample
 from carcassonne.training.run import TrainingRun
 
-_DEFAULT_CHANNELS = 64
-_DEFAULT_N_BLOCKS = 5
+_DEFAULT_CHANNELS = 48
+_DEFAULT_N_BLOCKS = 4
 
 
 @dataclass
@@ -120,10 +123,10 @@ class Learner:
 
     def train_step(self) -> dict[str, float]:
         batch = self._buffer.sample(self._config.batch_size, self._rng)
-        x, mask, policy_target, value_target = self._build_batch(batch)
+        x, mask, cell_mask, policy_target, value_target = self._build_batch(batch)
 
         self._net.train()
-        policy_logits, value = self._net(x, mask)
+        policy_logits, value = self._net(x, mask, cell_mask=cell_mask)
 
         # NaN-safe policy cross entropy over the target's (always-legal) support.
         logp = torch.log_softmax(policy_logits, dim=1)
@@ -175,49 +178,49 @@ class Learner:
 
     def _build_batch(
         self, batch: list[SampledExample]
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Batch of variable-size crops -> tensors padded to the batch max.
+
+        Rotation augmentation happens BEFORE padding (a rotated crop swaps h/w).
+        Padding cells are all-zero planes, False mask, 0 cell_mask -- the model's
+        MaskedGroupNorm guarantees they cannot influence real cells.
+        """
+        prepared: list[tuple[GameState, Crop, dict[Key, float]]] = []
+        for ex in batch:
+            state = self._buffer.state_for(ex.game_id, ex.move_n)
+            k = self._rng.randrange(4) if self._config.augment else 0
+            policy = ex.policy
+            if k:
+                for _ in range(k):
+                    state = rotate_state_90(state)
+                policy = {rotate_key(key, k): prob for key, prob in policy.items()}
+            prepared.append((state, Crop.of(state), policy))
+
+        ph = max(c.h for _, c, _ in prepared)
+        pw = max(c.w for _, c, _ in prepared)
+        n_actions = ph * pw * ACTIONS_PER_CELL
+
         planes_list: list[NDArray[np.float32]] = []
         mask_list: list[NDArray[np.bool_]] = []
+        cell_list: list[NDArray[np.float32]] = []
         policy_list: list[NDArray[np.float32]] = []
         value_list: list[float] = []
-        for ex in batch:
-            planes, mask, dense = self._prepare(ex)
-            planes_list.append(planes)
-            mask_list.append(mask)
+        for (state, crop, policy), ex in zip(prepared, batch, strict=True):
+            planes_list.append(encode_state(state, crop, pad_hw=(ph, pw)))
+            mask_list.append(legal_mask(state, crop, pad_hw=(ph, pw)))
+            cell_list.append(valid_mask(crop, pad_hw=(ph, pw)))
+            dense = np.zeros(n_actions, dtype=np.float32)
+            for key, prob in policy.items():
+                dense[flat_index(crop, key, stride_w=pw)] = prob
             policy_list.append(dense)
             value_list.append(ex.value)
+
         x = torch.from_numpy(np.stack(planes_list)).to(self._device)
         mask_t = torch.from_numpy(np.stack(mask_list)).to(self._device)
+        cell_t = torch.from_numpy(np.stack(cell_list)).to(self._device)
         policy_target = torch.from_numpy(np.stack(policy_list)).to(self._device)
         value_target = torch.tensor(value_list, dtype=torch.float32, device=self._device)
-        return x, mask_t, policy_target, value_target
-
-    def _prepare(
-        self, ex: SampledExample
-    ) -> tuple[NDArray[np.float32], NDArray[np.bool_], NDArray[np.float32]]:
-        """One example -> (planes, legal mask, dense policy target), D4-augmented."""
-        state = self._buffer.state_for(ex.game_id, ex.move_n)
-        k = self._rng.randrange(4) if self._config.augment else 0
-        rstate, policy = state, ex.policy
-        if k:
-            rotated = state
-            for _ in range(k):
-                rotated = rotate_state_90(rotated)
-            try:
-                remapped = _remap_policy(state, rotated, ex.policy, k)
-            except RulesError:
-                # A rotated move fell outside the fixed window; skip augmentation
-                # for this example rather than dropping target mass.
-                pass
-            else:
-                rstate, policy = rotated, remapped
-
-        planes = encode_state(rstate)
-        mask = legal_mask(rstate)
-        dense = np.zeros(ACTION_SPACE, dtype=np.float32)
-        for action_id, prob in policy.items():
-            dense[action_id] = prob
-        return planes, mask, dense
+        return x, mask_t, cell_t, policy_target, value_target
 
     def _append_metrics(self, metrics: dict[str, float]) -> None:
         line = json.dumps(metrics, separators=(",", ":"))
@@ -228,8 +231,11 @@ class Learner:
 # ---------------------------------------------------------------------------
 # D4 (rotation) helpers -- correctness by construction via the rules engine.
 #
-# ``rotate_state_90`` mirrors the transform verified D4-equivariant against
-# ``encode_state`` in tests/nn/test_encode.py::test_d4_rotation_equivariance.
+# These remain the source of truth for rotating *planes*: ``rotate_state_90``
+# is verified D4-equivariant against ``encode_state`` in
+# tests/nn/test_encode.py::test_d4_rotation_equivariance. Policy *keys* rotate
+# arithmetically via ``carcassonne.nn.actions.rotate_key`` -- the same world
+# transform, verified against these helpers in tests/training/test_learner.py.
 
 
 def _rot_pos(p: Pos) -> Pos:
@@ -276,26 +282,8 @@ def rotate_state_90(state: GameState) -> GameState:
     def rot_node(n: tuple[Pos, int] | None) -> tuple[Pos, int] | None:
         return (_rot_pos(n[0]), n[1]) if n is not None else None
 
-    abbot_at = (rot_node(state.abbot_at[0]), rot_node(state.abbot_at[1]))
+    abbot_at = tuple(rot_node(n) for n in state.abbot_at)
     return dataclasses.replace(state, board=board, features=idx, abbot_at=abbot_at)
-
-
-def _remap_policy(
-    state: GameState, rotated: GameState, policy: dict[int, float], k: int
-) -> dict[int, float]:
-    """Map a sparse policy from ``state`` onto its ``k``-times-rotated ``rotated``.
-
-    Each action id is decoded to a ``Move`` on ``state``, rotated ``k`` times, and
-    re-encoded on ``rotated``. Raises :class:`RulesError` (propagated) if any
-    rotated move falls outside the encoding window.
-    """
-    remapped: dict[int, float] = {}
-    for action_id, prob in policy.items():
-        move = decode_move(state, action_id)
-        for _ in range(k):
-            move = _rotate_move(move)
-        remapped[encode_move(rotated, move)] = prob
-    return remapped
 
 
 def _net_from_config(cfg: dict[str, Any]) -> CarcassonneNet:

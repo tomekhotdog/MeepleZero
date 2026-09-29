@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import dataclasses
 import random
 
 import numpy as np
@@ -8,9 +7,7 @@ import pytest
 
 from carcassonne.core import GameConfig, RulesError, apply, is_terminal, legal_moves, new_game
 from carcassonne.core.engine import GameState
-from carcassonne.core.features import FeatureIndex, Meeple
-from carcassonne.core.state import Board, PlacedTile
-from carcassonne.core.types import PlaceMeeple, Pos, Rotation
+from carcassonne.core.types import PlaceMeeple
 from carcassonne.nn.actions import Crop
 from carcassonne.nn.encode import (
     _CUR0,
@@ -20,6 +17,7 @@ from carcassonne.nn.encode import (
     encode_state,
     valid_mask,
 )
+from carcassonne.training.learner import rotate_state_90
 
 # ---------------------------------------------------------------------------
 # helpers
@@ -62,51 +60,6 @@ def _meeple_biased_game(seed: int, moves: int) -> GameState:
         preferred = [m for m in legal if isinstance(m.action, PlaceMeeple)]
         state = apply(state, rng.choice(preferred or list(legal)))
     return state
-
-
-# ---------------------------------------------------------------------------
-# Rotation machinery.
-# local copy: learner.py is red-window-broken until M12; M12 must re-point this
-# import back to `from carcassonne.training.learner import rotate_state_90`.
-
-
-def _rot_pos(p: Pos) -> Pos:
-    """World 90-degree clockwise rotation of a cell: (x, y) -> (y, -x)."""
-    return Pos(p.y, -p.x)
-
-
-def _rot_rotation(r: Rotation) -> Rotation:
-    return Rotation((int(r) + 1) % 4)
-
-
-def rotate_state_90(state: GameState) -> GameState:
-    """A genuine 90-degree-clockwise rotation of the whole game state.
-
-    Rebuilds the feature index from the rotated board (union-find is order
-    independent), re-places every meeple on its rotated node, and rotates the
-    abbot bookkeeping, so the result is a fully valid ``GameState`` equivalent to
-    the original under a board rotation.
-    """
-    rotated = {
-        _rot_pos(p): PlacedTile(pt.type_id, _rot_rotation(pt.rotation))
-        for p, pt in state.board.items()
-    }
-    board: Board = {}
-    idx = FeatureIndex.empty()
-    for pos in sorted(rotated):
-        board[pos] = rotated[pos]
-        idx = idx.with_tile(board, pos)
-    for d in state.features.data.values():
-        for m in d.meeples:
-            mpos, feat = m.node
-            node = (_rot_pos(mpos), feat)
-            idx = idx.with_meeple(node, Meeple(m.player, m.kind, node))
-
-    def rot_node(n: tuple[Pos, int] | None) -> tuple[Pos, int] | None:
-        return (_rot_pos(n[0]), n[1]) if n is not None else None
-
-    abbot_at = tuple(rot_node(n) for n in state.abbot_at)
-    return dataclasses.replace(state, board=board, features=idx, abbot_at=abbot_at)
 
 
 # ---------------------------------------------------------------------------

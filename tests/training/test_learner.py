@@ -1,6 +1,7 @@
-"""Learner tests: NaN-safe loss, overfit sanity, D4 augmentation consistency,
-and lossless resume. Everything is kept tiny (channels=8, n_blocks=1, small
-batches, few steps) so the whole module runs fast on CPU."""
+"""Learner tests: NaN-safe loss, overfit sanity, padded dynamic-crop batches,
+D4 augmentation consistency, and lossless resume. Everything is kept tiny
+(channels=8, n_blocks=1, small batches, few steps) so the whole module runs
+fast on CPU."""
 
 from __future__ import annotations
 
@@ -11,14 +12,13 @@ from pathlib import Path
 
 import numpy as np
 import torch
-from numpy.typing import NDArray
 
 from carcassonne.agents import RandomAgent
 from carcassonne.core.engine import legal_moves
 from carcassonne.game.match import play_game
 from carcassonne.game.replay import load_replay, replay_states
-from carcassonne.nn.actions import encode_move
-from carcassonne.nn.encode import NUM_PLANES, encode_state
+from carcassonne.nn.actions import Crop, flat_index, move_key, rotate_key
+from carcassonne.nn.encode import NUM_PLANES, PLANES, encode_state
 from carcassonne.nn.model import CarcassonneNet
 from carcassonne.training.buffer import Example, ReplayBuffer
 from carcassonne.training.learner import Learner, LearnerConfig, rotate_state_90
@@ -46,9 +46,8 @@ def _real_buffer(tmp_path: Path, seed: int = 7) -> tuple[ReplayBuffer, int]:
     for k in range(n_moves):
         state = states[k]
         chosen = legal_moves(state)[:3]  # up to 3 genuinely-legal actions
-        ids = [encode_move(state, m) for m in chosen]
-        prob = 1.0 / len(ids)
-        policy = {i: prob for i in ids}
+        prob = 1.0 / len(chosen)
+        policy = {move_key(m): prob for m in chosen}
         examples.append(Example(move_n=k, policy=policy, value=float((-1, 0, 1)[k % 3])))
     buf.add_game("g", str(result.replay_path), examples, order_key=0)
     return buf, n_moves
@@ -94,8 +93,9 @@ def test_train_step_runs_and_updates_params(tmp_path: Path) -> None:
 
 
 def test_policy_loss_is_nan_safe(tmp_path: Path) -> None:
-    """The overwhelming majority of the ~53.8k actions are illegal (masked to
-    -inf); the policy loss must still be finite (no 0 * -inf = NaN)."""
+    """Almost every flat action index is illegal (masked to -inf) — even more so
+    in a padded batch, where whole padding cells are masked out; the policy loss
+    must still be finite (no 0 * -inf = NaN)."""
     torch.manual_seed(0)
     buf, _ = _real_buffer(tmp_path)
     run = _run(tmp_path)
@@ -127,57 +127,109 @@ def test_overfits_tiny_buffer(tmp_path: Path) -> None:
     buf.close()
 
 
+def test_build_batch_pads_to_batch_max(tmp_path: Path) -> None:
+    """Mixed crop sizes -> one padded tensor; masks/targets in padded geometry."""
+    torch.manual_seed(0)
+    buf, _ = _real_buffer(tmp_path)
+    run = _run(tmp_path)
+    learner = Learner(_tiny_net(), buf, run, _cfg(batch_size=8), random.Random(0))
+
+    batch = buf.sample(8, random.Random(0))
+    x, mask, cell_mask, policy_target, value_target = learner._build_batch(batch)  # noqa: SLF001
+    n, p, ph, pw = x.shape
+    assert n == 8 and p == NUM_PLANES
+    assert mask.shape == (n, ph * pw * 56)
+    assert cell_mask.shape == (n, ph, pw)
+    assert policy_target.shape == (n, ph * pw * 56)
+    assert value_target.shape == (n,)
+    # The batch genuinely mixes crop sizes (early vs late positions of one game).
+    areas = cell_mask.sum(dim=(1, 2))
+    assert len(set(areas.tolist())) > 1, "batch has uniform crop sizes; fixture too weak"
+    # Every target index must be a legal (masked-in) action.
+    assert bool(mask[policy_target > 0].all())
+    # Planes are exactly zero on padding cells.
+    assert bool((x * (1.0 - cell_mask.unsqueeze(1))).abs().sum() == 0)
+    buf.close()
+
+
 def test_rotate_state_matches_encode_equivariance(tmp_path: Path) -> None:
     """The learner's rotate_state_90 produces a state whose encoding is the
-    np.rot90 (plus edge-side permutation) of the original -- the D4 property the
-    augmentation relies on."""
+    np.rot90 of the original on spatial planes -- the D4 property the
+    augmentation relies on. (The crop re-anchors, so no manual cropping.)"""
     buf, n_moves = _real_buffer(tmp_path)
     state = buf.state_for("g", min(10, n_moves - 1))
     e = encode_state(state)
     er = encode_state(rotate_state_90(state))
 
-    from carcassonne.nn.actions import window_origin
-    from carcassonne.nn.encode import PLANES
+    occ = PLANES.index("occupied")
+    assert np.array_equal(er[occ], np.rot90(e[occ], 1))
+    buf.close()
 
-    def crop(planes: NDArray[np.float32], st: object) -> NDArray[np.float32]:
-        ox, oy = window_origin(st)  # type: ignore[arg-type]
-        xs = [p.x for p in st.board]  # type: ignore[attr-defined]
-        ys = [p.y for p in st.board]  # type: ignore[attr-defined]
-        return planes[:, min(ys) - oy : max(ys) - oy + 1, min(xs) - ox : max(xs) - ox + 1]
 
-    co = crop(e, state)
-    cr = crop(er, rotate_state_90(state))
-    # occupied plane is a plain rot90 (no side permutation involved).
-    assert np.array_equal(cr[PLANES.index("occupied")], np.rot90(co[PLANES.index("occupied")], 1))
+def test_augmented_target_consistent_with_engine(tmp_path: Path) -> None:
+    """rotate_key must agree with the engine: the rotated key is a legal move's
+    key on the rotated state, and flat_index on the rotated crop never raises,
+    for every k in {1, 2, 3}."""
+    buf, n_moves = _real_buffer(tmp_path)
+    state = buf.state_for("g", min(12, n_moves - 1))
+    for move in legal_moves(state)[:8]:
+        key = move_key(move)
+        rstate = state
+        for k in (1, 2, 3):
+            rstate = rotate_state_90(rstate)
+            rkey = rotate_key(key, k)
+            # the rotated key must be a legal move's key on the rotated state
+            assert rkey in {move_key(m) for m in legal_moves(rstate)}
+            flat_index(Crop.of(rstate), rkey)  # must not raise
     buf.close()
 
 
 def test_d4_augmentation_policy_mass_on_legal(tmp_path: Path) -> None:
     """With augment=True the (planes, policy) pair the learner builds is
-    self-consistent: every non-zero policy id is a legal action of the same
+    self-consistent: every non-zero policy index is a legal action of the same
     (rotated) state the planes encode."""
     torch.manual_seed(0)
     buf, _ = _real_buffer(tmp_path)
     run = _run(tmp_path)
-    learner = Learner(
-        _tiny_net(), buf, run, _cfg(augment=True), random.Random(3)
-    )
+    learner = Learner(_tiny_net(), buf, run, _cfg(augment=True), random.Random(3))
 
     batch = buf.sample(12, random.Random(3))
+    x, mask, _cell, policy_target, _ = learner._build_batch(batch)  # noqa: SLF001
+    _, _, ph, pw = x.shape
+    # Policy mass sits exactly on legal actions of the rotated states the planes encode.
+    assert bool(mask[policy_target > 0].all()), "policy mass on an illegal action"
+    sums = policy_target.sum(dim=1)
+    assert torch.allclose(sums, torch.ones_like(sums), rtol=1e-5)
+    # Confirm augmentation actually rotated at least one example: its planes
+    # differ from the un-rotated encoding of its source state.
     seen_rotation = False
-    for ex in batch:
-        planes, mask, dense = learner._prepare(ex)  # noqa: SLF001 (white-box on purpose)
-        nonzero = np.nonzero(dense)[0]
-        assert nonzero.size > 0
-        # Policy mass sits exactly on legal actions of the encoded state.
-        assert mask[nonzero].all(), "policy mass on an illegal action after augmentation"
-        assert math.isclose(float(dense.sum()), 1.0, rel_tol=1e-5)
-        # Confirm augmentation actually rotated at least one example: its planes
-        # differ from the un-rotated encoding of the source state.
+    for i, ex in enumerate(batch):
         src = buf.state_for(ex.game_id, ex.move_n)
-        if not np.array_equal(planes, encode_state(src)):
+        crop = Crop.of(src)
+        if crop.h > ph or crop.w > pw:
+            # The unrotated crop cannot even fit the padded batch: this example
+            # was necessarily rotated (its own rotated crop fits by construction).
+            seen_rotation = True
+            continue
+        unrotated = torch.from_numpy(encode_state(src, pad_hw=(ph, pw)))
+        if not torch.equal(x[i], unrotated):
             seen_rotation = True
     assert seen_rotation, "augmentation never rotated any example (rng/coverage)"
+    buf.close()
+
+
+def test_train_step_finite_loss_with_augmentation(tmp_path: Path) -> None:
+    """A full augmented train step over a padded, rotated batch stays finite."""
+    torch.manual_seed(0)
+    buf, _ = _real_buffer(tmp_path)
+    run = _run(tmp_path)
+    learner = Learner(
+        _tiny_net(), buf, run, _cfg(augment=True, batch_size=8), random.Random(5)
+    )
+    metrics = learner.train_step()
+    assert math.isfinite(metrics["loss"])
+    assert math.isfinite(metrics["policy_loss"])
+    assert math.isfinite(metrics["value_loss"])
     buf.close()
 
 
