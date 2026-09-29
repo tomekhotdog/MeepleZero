@@ -167,20 +167,34 @@ def test_rotate_state_matches_encode_equivariance(tmp_path: Path) -> None:
 
 
 def test_augmented_target_consistent_with_engine(tmp_path: Path) -> None:
-    """rotate_key must agree with the engine: the rotated key is a legal move's
-    key on the rotated state, and flat_index on the rotated crop never raises,
-    for every k in {1, 2, 3}."""
+    """rotate_key must agree with the engine: for every k in {1, 2, 3} it is a
+    bijection from the legal Keys of a state onto the legal Keys of the rotated
+    state -- over ALL legal moves, including meeple / abbot placements and
+    RetrieveAbbot, whose tile-local sub-action must survive rotation unchanged.
+    Set equality (not membership) catches a wrong rotation direction that
+    happens to land on some other legal key of a symmetric tile. flat_index on
+    the rotated crop must never raise."""
     buf, n_moves = _real_buffer(tmp_path)
-    state = buf.state_for("g", min(12, n_moves - 1))
-    for move in legal_moves(state)[:8]:
-        key = move_key(move)
+    # Seed-7 positions chosen for sub-action coverage: move 2 offers abbot
+    # placements, move 9 has an abbot on the board (RetrieveAbbot legal).
+    subs_seen: set[int] = set()
+    for move_n in (2, 9):
+        assert move_n < n_moves
+        state = buf.state_for("g", move_n)
+        keys = {move_key(m) for m in legal_moves(state)}
+        subs_seen |= {a for (_x, _y, _r, a) in keys}
         rstate = state
         for k in (1, 2, 3):
             rstate = rotate_state_90(rstate)
-            rkey = rotate_key(key, k)
-            # the rotated key must be a legal move's key on the rotated state
-            assert rkey in {move_key(m) for m in legal_moves(rstate)}
-            flat_index(Crop.of(rstate), rkey)  # must not raise
+            rotated = {rotate_key(key, k) for key in keys}
+            assert rotated == {move_key(m) for m in legal_moves(rstate)}, f"k={k}"
+            crop = Crop.of(rstate)
+            for rkey in rotated:
+                flat_index(crop, rkey)  # must not raise
+    # The chosen states must actually exercise non-trivial sub-actions.
+    assert any(1 <= a <= 6 for a in subs_seen), "no meeple placements covered"
+    assert any(7 <= a <= 12 for a in subs_seen), "no abbot placements covered"
+    assert 13 in subs_seen, "no RetrieveAbbot covered"
     buf.close()
 
 
