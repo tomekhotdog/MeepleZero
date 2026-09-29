@@ -35,15 +35,21 @@ mutually compatible.
 
 ```bash
 uv run carcassonne train --run runs/pi-001 \
-  --channels 64 --n-blocks 5 --sims 100 \
+  --channels 48 --n-blocks 4 --sims 100 \
   --selfplay-games 20 --learn-steps 40 \
   --gate-every 5 --gate-games 20 --seed 0
 ```
 
-Tune for the Pi's throughput: CPU self-play dominates wall-clock (each MCTS move
-is `sims` sequential network evaluations). Start smaller (`--sims 50`,
-`--selfplay-games 8`) and scale up once you see the loss falling and the
-`wr_greedy` yardstick climbing on the dashboard.
+(48 channels × 4 blocks is the network's own default — ~193k params, sized for
+Pi inference; pass the flags explicitly so the run's config is self-describing.)
+
+Tune for the Pi's throughput: CPU self-play dominates wall-clock — each MCTS
+move is `sims` sequential network evaluations, and one evaluation's cost scales
+with the actual board area (the encoder crops to the placed tiles' bounding
+box + 1, so early-game evaluations run on tiny grids: roughly 2 ms at the
+start of a game up to ~10 ms on a full end-game board, per CPU core). Start
+smaller (`--sims 50`, `--selfplay-games 8`) and scale up once you see the loss
+falling and the `wr_greedy` yardstick climbing on the dashboard.
 
 ## Run it for days, unattended (systemd)
 
@@ -66,7 +72,7 @@ Type=simple
 User=pi
 WorkingDirectory=/home/pi/Carcasonne
 ExecStart=/home/pi/.local/bin/uv run carcassonne train --run runs/pi-001 --resume \
-  --channels 64 --n-blocks 5 --sims 100 --selfplay-games 20 --learn-steps 40 \
+  --channels 48 --n-blocks 4 --sims 100 --selfplay-games 20 --learn-steps 40 \
   --gate-every 5 --gate-games 20
 Restart=always
 RestartSec=10
@@ -112,9 +118,8 @@ the opponent) or evaluate headless:
 uv run carcassonne evaluate --p0 ckpt:latest --p1 greedy --games 100 --seed 1
 ```
 
-The iteration-1 success bar is `wr(ckpt:latest vs greedy) > 70%` over 100 games.
-An **untrained** net's MCTS is weak — measured at 3/10 vs *RandomAgent* at 64
-sims (search only amplifies the value head — see the T16 finding in the plan);
-it has not been measured against greedy but is expected to lose to it too. The
+The training success bar is `wr(ckpt:latest vs greedy) > 70%` over 100 games.
+An **untrained** net's MCTS is weak — search only amplifies the value head, and
+a random value head amplifies noise — so it loses even to simple opponents. The
 win rate is a *training* outcome, so let the run climb the `wr_greedy` yardstick
 on the dashboard before expecting it.

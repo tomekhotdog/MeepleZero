@@ -58,6 +58,9 @@ defined term; in docs, bold on first use per section.
   of placed tiles plus a 1-cell border. By the adjacency rule it contains
   every legal placement; its size H×W varies per state (replaces the fixed
   31×31 window).
+- **Key** — a Move in world coordinates, `(x, y, rotation, sub-action)`: the
+  stable vocabulary the ReplayBuffer stores policy targets in; per-state flat
+  indices are an encode-time detail derived from it.
 - **Encoder** — maps a GameState to `(planes, H, W)` tensor planes over the
   Crop; includes FeaturePlanes and the current tile as structural property
   planes.
