@@ -10,11 +10,12 @@ from __future__ import annotations
 import random
 from pathlib import Path
 
+import pytest
 import torch
 
 from carcassonne.core import apply, is_terminal, legal_moves, new_game
 from carcassonne.core.engine import GameState
-from carcassonne.nn.checkpoint import latest, load, pick_device, save
+from carcassonne.nn.checkpoint import CHECKPOINT_FORMAT, latest, load, pick_device, save
 from carcassonne.nn.encode import NUM_PLANES
 from carcassonne.nn.model import CarcassonneNet, evaluate_state
 
@@ -98,3 +99,41 @@ def test_runs_on_pick_device() -> None:
     assert probs.shape == (len(moves),)
     assert abs(probs.sum() - 1.0) < 1e-5
     assert -1.0 <= value <= 1.0
+
+
+def _legacy_checkpoint(directory: Path, fmt: int | None = None) -> Path:
+    """A pre-iteration-3-shaped payload: 31x31-era keys the dynamic-crop net
+    doesn't have, and no (or a foreign) format marker."""
+    directory.mkdir(parents=True, exist_ok=True)
+    payload: dict[str, object] = {
+        "step": 3,
+        "model_state": {"policy_fc.weight": torch.zeros(2, 2)},
+        "optimizer_state": None,
+        "config": None,
+        "net_arch": {"channels": 16, "n_blocks": 1, "num_planes": NUM_PLANES},
+    }
+    if fmt is not None:
+        payload["format"] = fmt
+    path = directory / "step_000003.pt"
+    torch.save(payload, path)
+    return path
+
+
+def test_save_writes_format_marker_and_round_trips(tmp_path: Path) -> None:
+    path = save(tmp_path, step=1, net=_net())
+    assert torch.load(path)["format"] == CHECKPOINT_FORMAT
+    assert load(path, torch.device("cpu"))["step"] == 1
+
+
+@pytest.mark.parametrize("fmt", [None, 2, CHECKPOINT_FORMAT + 1])
+def test_load_rejects_foreign_format_with_one_clear_error(tmp_path: Path, fmt: int | None) -> None:
+    """An old run must fail with a single actionable message -- not torch's wall
+    of missing/unexpected state_dict keys -- whether or not a net is passed."""
+    path = _legacy_checkpoint(tmp_path, fmt)
+    for net in (None, _net()):
+        with pytest.raises(ValueError, match="start a new run directory") as exc:
+            load(path, torch.device("cpu"), net=net)
+        msg = str(exc.value)
+        assert str(path) in msg
+        assert f"format {fmt}" in msg
+        assert "Missing key" not in msg

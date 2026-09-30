@@ -11,6 +11,7 @@ import random
 from pathlib import Path
 
 import numpy as np
+import pytest
 import torch
 
 from carcassonne.agents import RandomAgent
@@ -289,4 +290,18 @@ def test_metrics_jsonl_one_line_per_step(tmp_path: Path) -> None:
             "buffer_games",
             "buffer_examples",
         }
+    buf.close()
+
+
+def test_resume_from_pre_iteration3_run_fails_clearly(tmp_path: Path) -> None:
+    """Resuming an old run surfaces the checkpoint's clean-break error, before
+    the learner ever samples the (equally old) buffer."""
+    buf, _ = _real_buffer(tmp_path)
+    run = _run(tmp_path)
+    torch.save(
+        {"step": 9, "model_state": {"policy_fc.weight": torch.zeros(1)}, "net_arch": _NET_ARCH},
+        run.checkpoints_dir / "step_000009.pt",
+    )
+    with pytest.raises(ValueError, match="pre-iteration-3"):
+        Learner.from_run(run, buf, _cfg(), random.Random(0))
     buf.close()

@@ -5,6 +5,10 @@ dict). The filename encodes the training step, so :func:`latest` can pick the
 newest without any sidecar index -- keeping resume-from-disk (the Pi requirement)
 dead simple. ``net_arch`` is stored alongside the weights so :func:`load` can
 reconstruct a :class:`CarcassonneNet` when no live instance is passed.
+
+``format`` marks the payload layout. Iteration 3 (the dynamic-crop net) is a
+clean break: a checkpoint without the current marker is refused with one clear
+error instead of torch's wall of missing/unexpected state_dict keys.
 """
 
 from __future__ import annotations
@@ -15,6 +19,8 @@ from typing import Any
 import torch
 
 from carcassonne.nn.model import CarcassonneNet
+
+CHECKPOINT_FORMAT = 3  # bump when the payload or net layout breaks compatibility
 
 CheckpointId = str  # a checkpoint's filename stem, e.g. "step_000123"
 
@@ -54,6 +60,7 @@ def save(
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / _filename(step)
     payload: dict[str, Any] = {
+        "format": CHECKPOINT_FORMAT,
         "step": step,
         "model_state": net.state_dict(),
         "optimizer_state": optimizer.state_dict() if optimizer is not None else None,
@@ -80,12 +87,20 @@ def load(
 ) -> dict[str, Any]:
     """Restore a checkpoint.
 
-    If ``net`` is None, a fresh :class:`CarcassonneNet` is built from the stored
-    ``net_arch``. Weights (and optimizer state, when both an optimizer and stored
-    state are present) are loaded in place. Returns the payload dict augmented
+    Raises :class:`ValueError` if the payload's ``format`` isn't
+    :data:`CHECKPOINT_FORMAT` (an old run). If ``net`` is None, a fresh
+    :class:`CarcassonneNet` is built from the stored ``net_arch``.
+    Weights (and optimizer state, when both an optimizer and stored state are
+    present) are loaded in place. Returns the payload dict augmented
     with the live ``net`` (and ``optimizer``).
     """
     payload: dict[str, Any] = torch.load(path, map_location=device)
+    fmt = payload.get("format")
+    if fmt != CHECKPOINT_FORMAT:
+        raise ValueError(
+            f"checkpoint {path} is from a pre-iteration-3 run (format {fmt}); the "
+            f"dynamic-crop net can't load it -- start a new run directory"
+        )
 
     if net is None:
         arch = payload["net_arch"]
