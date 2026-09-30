@@ -314,15 +314,108 @@ def test_three_player_game_end_to_end(client: TestClient, replays_dir: Path) -> 
     assert [m["seat"] for m in body["ai_moves"]] == [0]
     game_id = body["game_id"]
     state = body["state"]
+    last: dict[str, Any] = {}
     while not state["terminal"]:
         moved = client.post(f"/api/games/{game_id}/move", json={"idx": 0})
         assert moved.status_code == 200
-        state = moved.json()["state"]
+        last = moved.json()
+        state = last["state"]
     assert len(state["final_scores"]) == 3
     (path,) = replays_dir.glob("*.jsonl")
     replay = load_replay(path)
     assert replay.header.config.num_players == 3
     list(replay_states(replay))
+    # the replay names every seat in seat order and ends on the scores the API reported
+    detail = client.get(f"/api/replays/{last['replay']}").json()
+    assert detail["header"]["agents"] == ["random", "human", "random"]
+    assert detail["final_scores"] == state["final_scores"]
+    assert list(replay.final_scores) == state["final_scores"]
+
+
+def _create(client: TestClient, **body: Any) -> Any:
+    r = client.post("/api/games", json=body)
+    assert r.status_code == 200, r.json()
+    return r.json()
+
+
+def test_human_in_last_seat_waits_for_every_ai_seat_in_order(client: TestClient) -> None:
+    body = _create(
+        client, opponents=["random"] * 3, num_players=4, human_player=3, seed=21
+    )
+    assert body["seats"] == ["random", "random", "random", "human"]
+    assert [m["seat"] for m in body["ai_moves"]] == [0, 1, 2]
+    assert body["state"]["current_player"] == 3
+    moved = client.post(f"/api/games/{body['game_id']}/move", json={"idx": 0}).json()
+    assert not moved["state"]["terminal"]  # one move into a 72-tile game
+    # turn order wraps around: after seat 3 come seats 0, 1, 2
+    assert [m["seat"] for m in moved["ai_moves"]] == [0, 1, 2]
+    assert moved["state"]["current_player"] == 3
+
+
+def test_human_in_first_seat_of_four_is_followed_by_seats_1_2_3(client: TestClient) -> None:
+    body = _create(
+        client, opponents=["random"] * 3, num_players=4, human_player=0, seed=22
+    )
+    assert body["ai_moves"] == []
+    moved = client.post(f"/api/games/{body['game_id']}/move", json={"idx": 0}).json()
+    assert [m["seat"] for m in moved["ai_moves"]] == [1, 2, 3]
+    assert moved["state"]["current_player"] == 0
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        pytest.param({"opponent": "random", "opponents": ["random"]}, id="both"),
+        pytest.param({}, id="neither"),
+        pytest.param({"opponents": ["random", "random"], "num_players": 4}, id="mismatch"),
+        pytest.param({"opponents": ["random"] * 5, "num_players": 6}, id="six_players"),
+        pytest.param({"opponents": [], "num_players": 1}, id="one_player"),
+        pytest.param({"opponents": ["random", "random"], "num_players": 3, "human_player": 3},
+                     id="human_seat_n"),
+        pytest.param({"opponent": "random", "human_player": -1}, id="human_seat_negative"),
+    ],
+)
+def test_invalid_game_config_is_a_uniform_422(client: TestClient, body: dict[str, Any]) -> None:
+    r = client.post("/api/games", json=body)
+    assert r.status_code == 422
+    payload = r.json()
+    assert payload["error"] == "invalid_game_config"  # our shape, not pydantic's {"detail"}
+    assert payload["explanation"]
+
+
+def test_unknown_opponent_spec_keeps_its_own_error_code(client: TestClient) -> None:
+    r = client.post("/api/games", json={"opponents": ["random", "skynet"], "num_players": 3})
+    assert r.status_code == 422
+    assert r.json()["error"] == "unknown_opponent"
+
+
+def test_store_rejects_out_of_range_human_seat(tmp_path: Path) -> None:
+    """Seat validation lives in the store, so non-HTTP callers get it too."""
+    from carcassonne.web.sessions import InvalidGameConfig, SessionStore
+
+    with pytest.raises(InvalidGameConfig):
+        SessionStore(replays_dir=tmp_path).create(["random"], human_player=2, seed=0)
+
+
+def test_rejected_create_never_evicts_a_session(tmp_path: Path) -> None:
+    from carcassonne.web.sessions import (
+        _MAX_SESSIONS,
+        InvalidGameConfig,
+        SessionStore,
+        UnknownOpponent,
+    )
+
+    store = SessionStore(replays_dir=tmp_path)
+    oldest = store.create(["random"], 0, 0).id
+    for seed in range(1, _MAX_SESSIONS):
+        store.create(["random"], 0, seed)
+    assert len(store._sessions) == _MAX_SESSIONS  # at capacity: the next create evicts
+    with pytest.raises(UnknownOpponent):
+        store.create(["skynet"], 0, 99)
+    with pytest.raises(InvalidGameConfig):
+        store.create(["random"], 5, 99)
+    assert store.get(oldest).id == oldest
+    assert len(store._sessions) == _MAX_SESSIONS
 
 
 def test_checkpoint_opponents_rejected_beyond_two_players(client: TestClient) -> None:

@@ -43,6 +43,10 @@ class UnknownOpponent(Exception):
     """Unknown agent spec in game creation -> HTTP 422."""
 
 
+class InvalidGameConfig(Exception):
+    """Game-creation parameters that don't describe a valid table -> HTTP 422."""
+
+
 class HintUnavailable(Exception):
     """Hint asked for in a game with several AI seats -> HTTP 409."""
 
@@ -144,9 +148,18 @@ class SessionStore:
         """Seat the human at ``human_player`` and one agent per spec, in seat order,
         in the remaining seats (so ``len(opponent_specs) + 1`` players).
 
-        Checkpoint agents are 2-player only (the RL stack is): seating one in a
-        larger game is an UnknownOpponent, the web-level mirror of that guard."""
+        The single source of truth for seat validation: a table outside 2..5
+        players or a human seat outside it is an InvalidGameConfig. Checkpoint
+        agents are 2-player only (the RL stack is): seating one in a larger game
+        is an UnknownOpponent, the web-level mirror of that guard. Eviction runs
+        only once every agent is built, so a rejected request never evicts."""
         num_players = len(opponent_specs) + 1
+        if not 2 <= num_players <= 5:  # mirrors core.new_game's rule
+            raise InvalidGameConfig(f"a game needs 2..5 players, got {num_players}")
+        if not 0 <= human_player < num_players:
+            raise InvalidGameConfig(
+                f"human_player {human_player} out of range for {num_players} players"
+            )
         if num_players > 2:
             for spec in opponent_specs:
                 if spec.startswith("ckpt:"):
@@ -154,11 +167,11 @@ class SessionStore:
                         f"checkpoint agents are 2-player only; cannot seat {spec!r}"
                         f" in a {num_players}-player game"
                     )
-        self._evict_for_capacity()
         try:
             opponents = [make_agent(s) for s in opponent_specs]
         except ValueError as e:
             raise UnknownOpponent(str(e)) from e
+        self._evict_for_capacity()
         config = GameConfig(num_players=num_players)
         state = new_game(seed, config)
         ai_seats = [s for s in range(num_players) if s != human_player]

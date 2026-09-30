@@ -17,14 +17,20 @@ from typing import Any
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from carcassonne.agents import list_checkpoints, set_checkpoints_dir
 from carcassonne.core import IllegalMove, RulesError
 from carcassonne.game.replay import load_replay, replay_states
 from carcassonne.training.run import TrainingRun
 from carcassonne.web import views
-from carcassonne.web.sessions import HintUnavailable, NotFound, SessionStore, UnknownOpponent
+from carcassonne.web.sessions import (
+    HintUnavailable,
+    InvalidGameConfig,
+    NotFound,
+    SessionStore,
+    UnknownOpponent,
+)
 
 _REPLAY_NAME = re.compile(r"[A-Za-z0-9._-]+\.jsonl")
 # A run name is a directory basename: a leading dot is disallowed so "." and
@@ -36,10 +42,13 @@ _STATIC_DIR = Path(__file__).parent / "static"
 
 
 class CreateGameBody(BaseModel):
+    # Types only, no range bounds: ranges are SessionStore's InvalidGameConfig
+    # (uniform {"error", "explanation"} 422); a non-int is malformed input and
+    # keeps pydantic's own 422 shape.
     opponent: str | None = None  # legacy 2-player shorthand
     opponents: list[str] | None = None  # AI seats in seat order (human seat skipped)
-    num_players: int = Field(default=2, ge=2, le=5)
-    human_player: int = Field(default=0, ge=0, le=4)
+    num_players: int = 2
+    human_player: int = 0
     seed: int | None = None
 
 
@@ -82,15 +91,13 @@ def create_app(
     @app.post("/api/games")
     def create_game(body: CreateGameBody) -> dict[str, Any]:
         if (body.opponent is None) == (body.opponents is None):
-            raise UnknownOpponent("pass exactly one of 'opponent' (2-player) or 'opponents'")
+            raise InvalidGameConfig("pass exactly one of 'opponent' (2-player) or 'opponents'")
         specs = body.opponents if body.opponents is not None else [str(body.opponent)]
-        n = len(specs) + 1
-        if n != body.num_players:
-            raise UnknownOpponent(
-                f"{len(specs)} opponents implies {n} players, not {body.num_players}"
+        if len(specs) + 1 != body.num_players:
+            raise InvalidGameConfig(
+                f"{len(specs)} opponents implies {len(specs) + 1} players,"
+                f" not {body.num_players}"
             )
-        if not body.human_player < n:
-            raise UnknownOpponent(f"human_player {body.human_player} out of range for {n} players")
         seed = body.seed if body.seed is not None else random.randrange(2**31)
         session = store.create(specs, body.human_player, seed)
         # AI seats before the human's open the game
@@ -193,6 +200,7 @@ def _register_error_handlers(app: FastAPI) -> None:
     register(NotFound, 404, "not_found")
     register(RulesError, 400, "replay_verification_failed")
     register(UnknownOpponent, 422, "unknown_opponent")
+    register(InvalidGameConfig, 422, "invalid_game_config")
 
 
 def _list_replays(replays_dir: Path) -> list[dict[str, Any]]:
