@@ -6,9 +6,17 @@ import random
 import numpy as np
 import torch
 
-from carcassonne.core import GameConfig, apply, legal_moves, new_game
+from carcassonne.core import GameConfig, apply, is_terminal, legal_moves, new_game
 from carcassonne.core.engine import GameState
-from carcassonne.nn.actions import ACTIONS, ACTIONS_PER_CELL, ROTS, Crop, encode_move, flat_index
+from carcassonne.nn.actions import (
+    ACTIONS,
+    ACTIONS_PER_CELL,
+    ROTS,
+    Crop,
+    encode_move,
+    flat_index,
+    move_key,
+)
 from carcassonne.nn.encode import NUM_PLANES, encode_state, valid_mask
 from carcassonne.nn.model import (
     CarcassonneNet,
@@ -118,16 +126,56 @@ def test_mask_sets_illegal_to_neg_inf() -> None:
     assert abs(float(probs.sum()) - 1.0) < 1e-5
 
 
-def test_evaluate_state_bridge() -> None:
+def _play(seed: int, n_moves: int) -> GameState:
+    """Random playout of up to ``n_moves``, stopping short of a terminal state."""
+    rng = random.Random(seed)
+    state = new_game(seed, GameConfig())
+    for _ in range(n_moves):
+        nxt = apply(state, rng.choice(legal_moves(state)))
+        if is_terminal(nxt):
+            break
+        state = nxt
+    return state
+
+
+def _reference_priors(net: CarcassonneNet, state: GameState) -> tuple[np.ndarray, float]:
+    """The pre-refactor path, spelled out: full-crop masked softmax, then gather
+    each legal move's probability via flat_index. evaluate_state must match it
+    bit-for-bit -- the aligned return is a layout change, not a numerics change."""
+    from carcassonne.nn.actions import legal_mask
+
+    x = torch.from_numpy(encode_state(state)).unsqueeze(0)
+    mask = torch.from_numpy(legal_mask(state)).unsqueeze(0)
+    with torch.no_grad():
+        logits, value = net(x, mask)
+        probs = torch.softmax(logits, dim=1).squeeze(0).numpy().astype(np.float32)
+    crop = Crop.of(state)
+    aligned = np.array([probs[flat_index(crop, move_key(m))] for m in legal_moves(state)])
+    return aligned, float(value.item())
+
+
+def test_evaluate_state_priors_align_with_callers_moves_exactly() -> None:
+    """Priors come back indexed like the caller's ``moves`` (MCTS's node arrays)
+    and equal the old full-crop-then-gather path exactly, on empty, mid and late
+    boards -- so the policy/Crop layout contract lives only inside nn."""
+    net = _tiny_net()
+    for state in (new_game(0, GameConfig()), _play(5, 10), _play(7, 60)):
+        moves = legal_moves(state)
+        priors, value = evaluate_state(net, state, torch.device("cpu"), moves)
+        ref_priors, ref_value = _reference_priors(net, state)
+        assert priors.shape == (len(moves),)
+        assert priors.dtype == np.float32
+        assert np.array_equal(priors, ref_priors)
+        assert value == ref_value
+        assert abs(float(priors.sum()) - 1.0) < 1e-4
+        assert -1.0 <= value <= 1.0
+
+
+def test_evaluate_state_follows_callers_move_order() -> None:
+    """Alignment is to the *given* sequence, not to legal_moves' own order."""
     net = _tiny_net()
     state = _mid_state()
-    probs, value = evaluate_state(net, state, torch.device("cpu"))
-    assert probs.shape == (Crop.of(state).n_actions,)
-    assert abs(float(probs.sum()) - 1.0) < 1e-4
-    assert -1.0 <= value <= 1.0
-    legal = {encode_move(state, m) for m in legal_moves(state)}
-    # Deliberately issubset, not equality: this bridge test runs softmax on
-    # float32 probs where a trained net's sharp policy could legitimately
-    # underflow a legal move to exactly 0. Exact partition is proven above in
-    # test_policy_head_matches_action_indexer with a small-logit net.
-    assert set(np.nonzero(probs)[0]).issubset(legal)
+    moves = legal_moves(state)
+    fwd, _ = evaluate_state(net, state, torch.device("cpu"), moves)
+    rev, _ = evaluate_state(net, state, torch.device("cpu"), moves[::-1])
+    assert np.array_equal(fwd, rev[::-1])

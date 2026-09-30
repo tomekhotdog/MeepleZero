@@ -374,3 +374,29 @@ def test_reused_root_annot_reports_total_visits() -> None:
     _, annot = agent.choose(s1, TurnContext(rng=random.Random(1), annotate=True))
     assert annot is not None
     assert annot.sims == inherited + sims > sims
+
+
+def test_node_expansion_enumerates_legal_moves_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Move generation is the engine's hot path: a leaf expansion must enumerate
+    legal moves once and hand them to the net, not have nn recompute them."""
+    import carcassonne.agents.mcts as mcts_mod
+    import carcassonne.nn.actions as actions_mod
+    import carcassonne.nn.model as model_mod
+
+    calls = 0
+    real = legal_moves
+
+    def counting(state: GameState) -> tuple[Move, ...]:
+        nonlocal calls
+        calls += 1
+        return real(state)
+
+    for mod in (mcts_mod, actions_mod, model_mod):
+        if hasattr(mod, "legal_moves"):
+            monkeypatch.setattr(mod, "legal_moves", counting)
+
+    agent = MctsAgent(_net(), DEVICE, MctsConfig(sims=1))
+    node = agent._make_node(new_game(SEED))
+    assert calls == 1
+    assert len(node.moves) == len(node.prior)
+    assert abs(float(node.prior.sum()) - 1.0) < 1e-9

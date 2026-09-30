@@ -14,7 +14,6 @@ import torch
 
 from carcassonne.core import apply, is_terminal, legal_moves, new_game
 from carcassonne.core.engine import GameState
-from carcassonne.nn.actions import Crop
 from carcassonne.nn.checkpoint import latest, load, pick_device, save
 from carcassonne.nn.encode import NUM_PLANES
 from carcassonne.nn.model import CarcassonneNet, evaluate_state
@@ -94,7 +93,8 @@ def test_runs_on_pick_device() -> None:
     device = pick_device()
     net = _net().to(device).eval()
     state = _mid_game(seed=4, moves=8)
-    probs, value = evaluate_state(net, state, device)
-    assert probs.shape == (Crop.of(state).n_actions,)
+    moves = legal_moves(state)
+    probs, value = evaluate_state(net, state, device, moves)
+    assert probs.shape == (len(moves),)
     assert abs(probs.sum() - 1.0) < 1e-5
     assert -1.0 <= value <= 1.0

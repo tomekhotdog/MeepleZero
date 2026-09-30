@@ -18,6 +18,7 @@ sees the same zeros as implicit zero-padding.
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 
 import numpy as np
 import torch
@@ -26,7 +27,8 @@ from numpy.typing import NDArray
 from torch import nn
 
 from carcassonne.core.engine import GameState
-from carcassonne.nn.actions import ACTIONS, ACTIONS_PER_CELL, ROTS
+from carcassonne.core.types import Move
+from carcassonne.nn.actions import ACTIONS, ACTIONS_PER_CELL, ROTS, Crop, move_indices
 from carcassonne.nn.encode import NUM_PLANES, encode_state
 
 _VALUE_CHANNELS = 8
@@ -93,7 +95,8 @@ class _ResBlock(nn.Module):
 
 
 def _policy_head_flatten(logits: torch.Tensor) -> torch.Tensor:
-    """``(N, 56, H, W)`` conv output -> ``(N, H*W*56)`` in ActionIndexer order.
+    """``(N, 56, H, W)`` conv output -> ``(N, H*W*56)`` in flat-index order
+    ``((gy*W + gx)*4 + rot)*14 + a`` (see :func:`carcassonne.nn.actions.flat_index`).
 
     Channels encode ``rot*14 + a``; target flat order (slow->fast) is
     ``gy, gx, rot, a`` -- split channels to (rot, a), permute, flatten.
@@ -175,27 +178,31 @@ def param_count(net: nn.Module) -> int:
 
 
 def evaluate_state(
-    net: CarcassonneNet, state: GameState, device: torch.device
+    net: CarcassonneNet, state: GameState, device: torch.device, moves: Sequence[Move]
 ) -> tuple[NDArray[np.float32], float]:
-    """Encode one ``state``, run the net masked to legal moves, return (probs, value).
+    """Evaluate one ``state``: (priors aligned with ``moves``, value).
 
-    ``probs`` has shape ``(Crop.of(state).n_actions,)``, sums to 1 over legal
-    moves, exactly 0 elsewhere. Unpadded single state -> ``cell_mask=None``
-    (fast ``F.group_norm`` path). The bridge MCTS calls; the model stays tensors.
+    ``moves`` are the caller's legal moves for ``state`` (passed in so a leaf
+    enumerates them once). ``priors[i]`` is the net's masked-softmax probability
+    of ``moves[i]``; they sum to 1 when ``moves`` is the full legal set. The Crop
+    and flat-index layout stay inside nn -- callers only ever see move order.
+    Unpadded single state -> ``cell_mask=None`` (fast ``F.group_norm`` path).
     """
-    from carcassonne.nn.actions import legal_mask  # local: avoid import cycle at module load
+    crop = Crop.of(state)
+    idx = move_indices(crop, moves)
+    mask = np.zeros(crop.n_actions, dtype=np.bool_)
+    mask[idx] = True
 
-    planes = encode_state(state)
-    x = torch.from_numpy(planes).unsqueeze(0).to(device)
-    mask = torch.from_numpy(legal_mask(state)).unsqueeze(0).to(device)
+    x = torch.from_numpy(encode_state(state, crop)).unsqueeze(0).to(device)
+    mask_t = torch.from_numpy(mask).unsqueeze(0).to(device)
 
     was_training = net.training
     net.eval()
     try:
         with torch.no_grad():
-            policy_logits, value = net(x, mask)
+            policy_logits, value = net(x, mask_t)
             probs = torch.softmax(policy_logits, dim=1).squeeze(0)
     finally:
         net.train(was_training)
 
-    return probs.cpu().numpy().astype(np.float32), float(value.item())
+    return probs.cpu().numpy().astype(np.float32)[idx], float(value.item())

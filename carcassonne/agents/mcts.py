@@ -47,7 +47,6 @@ from carcassonne.core import (
 )
 from carcassonne.game.agent import TurnContext
 from carcassonne.game.serde import Annot
-from carcassonne.nn.actions import Crop, flat_index, move_key
 from carcassonne.nn.model import CarcassonneNet, evaluate_state
 
 _TOP_K = 8
@@ -266,12 +265,9 @@ class MctsAgent:
                 w=empty_f.copy(),
                 q=empty_f.copy(),
             )
-        probs, value = evaluate_state(self._net, state, self._device)
         moves = legal_moves(state)
-        crop = Crop.of(state)  # hoisted once; encode_move would recompute it per move
-        prior = np.array(
-            [float(probs[flat_index(crop, move_key(m))]) for m in moves], dtype=np.float64
-        )
+        probs, value = evaluate_state(self._net, state, self._device, moves)
+        prior = probs.astype(np.float64)
         total = prior.sum()
         # probs already sum to 1 over legal moves; renormalise for numerical safety,
         # falling back to uniform only in the degenerate all-zero case.

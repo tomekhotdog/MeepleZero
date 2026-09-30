@@ -24,6 +24,7 @@ Two vocabularies:
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import NamedTuple
 
 import numpy as np
@@ -168,6 +169,14 @@ def legal_mask(
         # the same flat index — fail loud, never silent (and never stripped by -O).
         raise RulesError(f"padding {(ph, pw)} smaller than crop {(c.h, c.w)}")
     mask = np.zeros(ph * pw * ACTIONS_PER_CELL, dtype=np.bool_)
-    for move in legal_moves(state):
-        mask[flat_index(c, move_key(move), stride_w=pw)] = True
+    mask[move_indices(c, legal_moves(state), stride_w=pw)] = True
     return mask
+
+
+def move_indices(
+    crop: Crop, moves: Sequence[Move], stride_w: int | None = None
+) -> NDArray[np.int64]:
+    """Flat policy index of each move, aligned with ``moves`` (see :func:`flat_index`)."""
+    return np.fromiter(
+        (flat_index(crop, move_key(m), stride_w) for m in moves), dtype=np.int64, count=len(moves)
+    )
