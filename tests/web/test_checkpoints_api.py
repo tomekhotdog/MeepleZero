@@ -65,9 +65,10 @@ def test_play_vs_checkpoint_records_real_mcts_annot(client: TestClient) -> None:
             break
         moved = client.post(f"/api/games/{game_id}/move", json={"idx": 0})
         assert moved.status_code == 200
-        ai_move = moved.json()["ai_move"]
-        if ai_move is None:
+        ai_moves = moved.json()["ai_moves"]
+        if not ai_moves:
             continue  # human's move ended the game before the AI replied
+        (ai_move,) = ai_moves  # 2-player: exactly one AI reply
         annot = ai_move["annot"]
         assert annot is not None, "MctsAgent must record an annot"
         assert annot["sims"] == _TEST_SIMS  # real search budget, not greedy's 0
@@ -123,7 +124,7 @@ def test_repeated_hints_do_not_perturb_checkpoint_game(
             assert client.get(f"/api/games/{hinted}/hint").status_code == 200
         moved_h = client.post(f"/api/games/{hinted}/move", json={"idx": 0}).json()
         moved_c = client.post(f"/api/games/{clean}/move", json={"idx": 0}).json()
-        assert (moved_h["ai_move"] or {}).get("move") == (moved_c["ai_move"] or {}).get("move")
+        assert [m["move"] for m in moved_h["ai_moves"]] == [m["move"] for m in moved_c["ai_moves"]]
         assert moved_h["state"]["scores"] == moved_c["state"]["scores"]
         if moved_h["state"]["terminal"]:
             break

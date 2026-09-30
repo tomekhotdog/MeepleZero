@@ -12,12 +12,12 @@ import json
 import random
 import re
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from carcassonne.agents import list_checkpoints, set_checkpoints_dir
 from carcassonne.core import IllegalMove, RulesError
@@ -36,8 +36,10 @@ _STATIC_DIR = Path(__file__).parent / "static"
 
 
 class CreateGameBody(BaseModel):
-    opponent: str
-    human_player: Literal[0, 1] = 0
+    opponent: str | None = None  # legacy 2-player shorthand
+    opponents: list[str] | None = None  # AI seats in seat order (human seat skipped)
+    num_players: int = Field(default=2, ge=2, le=5)
+    human_player: int = Field(default=0, ge=0, le=4)
     seed: int | None = None
 
 
@@ -79,15 +81,31 @@ def create_app(
 
     @app.post("/api/games")
     def create_game(body: CreateGameBody) -> dict[str, Any]:
+        if (body.opponent is None) == (body.opponents is None):
+            raise UnknownOpponent("pass exactly one of 'opponent' (2-player) or 'opponents'")
+        specs = body.opponents if body.opponents is not None else [str(body.opponent)]
+        n = len(specs) + 1
+        if n != body.num_players:
+            raise UnknownOpponent(
+                f"{len(specs)} opponents implies {n} players, not {body.num_players}"
+            )
+        if not body.human_player < n:
+            raise UnknownOpponent(f"human_player {body.human_player} out of range for {n} players")
         seed = body.seed if body.seed is not None else random.randrange(2**31)
-        session = store.create(body.opponent, body.human_player, seed)
-        if body.human_player == 1:
-            session.ai_step()  # the AI holds seat 0 and opens the game
-        return {"game_id": session.id, "state": views.state_view(session.state)}
+        session = store.create(specs, body.human_player, seed)
+        # AI seats before the human's open the game
+        ai_moves = [views.ai_move_view(seat, m, a) for seat, m, a, _ in session.run_ai_turns()]
+        return {
+            "game_id": session.id,
+            "seats": list(session.seat_names),
+            "ai_moves": ai_moves,
+            "state": views.state_view(session.state),
+        }
 
     @app.get("/api/games/{game_id}")
     def get_game(game_id: str) -> dict[str, Any]:
-        return {"state": views.state_view(store.get(game_id).state)}
+        session = store.get(game_id)
+        return {"seats": list(session.seat_names), "state": views.state_view(session.state)}
 
     @app.get("/api/games/{game_id}/legal")
     def get_legal(game_id: str) -> dict[str, Any]:
@@ -97,14 +115,13 @@ def create_app(
     def post_move(game_id: str, body: MoveBody) -> dict[str, Any]:
         session = store.get(game_id)
         events = list(session.apply_human(body.idx))
-        ai_move: dict[str, Any] | None = None
-        if not session.terminal:
-            move, annot, ai_events = session.ai_step()
+        ai_moves: list[dict[str, Any]] = []
+        for seat, move, annot, ai_events in session.run_ai_turns():
             events.extend(ai_events)
-            ai_move = views.ai_move_view(move, annot)
+            ai_moves.append(views.ai_move_view(seat, move, annot))
         response: dict[str, Any] = {
             "state": views.state_view(session.state),
-            "ai_move": ai_move,
+            "ai_moves": ai_moves,
             "events": [views.score_event_view(e) for e in events],
         }
         if session.terminal:

@@ -1,4 +1,4 @@
-"""In-memory game sessions: one human-vs-agent game each, replay-recorded live.
+"""In-memory game sessions: one human vs 1-4 AI seats each, replay-recorded live.
 
 The store is a plain dict with no locking: the app runs in a single uvicorn
 worker (see the `serve` subcommand), so sessions are process-local by design.
@@ -48,7 +48,8 @@ class Session:
     id: str
     state: GameState
     human_player: int
-    opponent: Agent
+    agents: dict[int, Agent]  # seat -> agent for every AI seat; the human seat is absent
+    seat_names: tuple[str, ...]  # per-seat names, "human" at human_player
     rng: random.Random
     writer: ReplayWriter | None  # None once the end line is written
     legal_cache: list[Move]  # rebuilt after every state change; /move idx points here
@@ -71,18 +72,27 @@ class Session:
             )
         return self._apply(self.legal_cache[idx], annot=None)
 
-    def ai_step(self) -> tuple[Move, Annot | None, tuple[ScoreEvent, ...]]:
-        """Let the opponent take its turn, always with a real annot recorded."""
-        move, annot = self.opponent.choose(self.state, TurnContext(self.rng, annotate=True))
-        events = self._apply(move, annot)
-        return move, annot, events
+    def run_ai_turns(self) -> list[tuple[int, Move, Annot | None, tuple[ScoreEvent, ...]]]:
+        """Step every consecutive AI seat until it's the human's turn or the game ends.
+
+        Each step records a real annot; returns (seat, move, annot, events) per step."""
+        out: list[tuple[int, Move, Annot | None, tuple[ScoreEvent, ...]]] = []
+        while not self.terminal and self.state.current_player != self.human_player:
+            seat = self.state.current_player
+            move, annot = self.agents[seat].choose(self.state, TurnContext(self.rng, annotate=True))
+            out.append((seat, move, annot, self._apply(move, annot)))
+        return out
 
     def hint_annot(self) -> Annot | None:
-        """The opponent's read on the human's current position.
+        """The opponent's read on the human's current position (2-player only).
 
+        With several AI seats there is no single "opponent" to ask, so None.
         Uses a throwaway rng: hints must not perturb the session's agent rng
         stream, or replays would depend on how often the human peeked."""
-        _, annot = self.opponent.choose(self.state, TurnContext(random.Random(0), annotate=True))
+        if len(self.agents) != 1:
+            return None
+        opponent = next(iter(self.agents.values()))
+        _, annot = opponent.choose(self.state, TurnContext(random.Random(0), annotate=True))
         return annot
 
     def _apply(self, move: Move, annot: Annot | None) -> tuple[ScoreEvent, ...]:
@@ -123,16 +133,34 @@ class SessionStore:
                 victim.writer.__exit__(None, None, None)
                 victim.writer = None
 
-    def create(self, opponent_spec: str, human_player: int, seed: int) -> Session:
+    def create(self, opponent_specs: list[str], human_player: int, seed: int) -> Session:
+        """Seat the human at ``human_player`` and one agent per spec, in seat order,
+        in the remaining seats (so ``len(opponent_specs) + 1`` players).
+
+        Checkpoint agents are 2-player only (the RL stack is): seating one in a
+        larger game is an UnknownOpponent, the web-level mirror of that guard."""
+        num_players = len(opponent_specs) + 1
+        if num_players > 2:
+            for spec in opponent_specs:
+                if spec.startswith("ckpt:"):
+                    raise UnknownOpponent(
+                        f"checkpoint agents are 2-player only; cannot seat {spec!r}"
+                        f" in a {num_players}-player game"
+                    )
         self._evict_for_capacity()
         try:
-            opponent = make_agent(opponent_spec)
+            opponents = [make_agent(s) for s in opponent_specs]
         except ValueError as e:
             raise UnknownOpponent(str(e)) from e
-        config = GameConfig()
+        config = GameConfig(num_players=num_players)
         state = new_game(seed, config)
+        ai_seats = [s for s in range(num_players) if s != human_player]
+        agents = dict(zip(ai_seats, opponents, strict=True))
+        names_list = ["human"] * num_players
+        for seat, agent in agents.items():
+            names_list[seat] = agent.name
+        names = tuple(names_list)
         started_at = datetime.now(UTC).isoformat(timespec="seconds")
-        names = ("human", opponent.name) if human_player == 0 else (opponent.name, "human")
         self.replays_dir.mkdir(parents=True, exist_ok=True)
         path = _unique_replay_path(self.replays_dir, started_at, seed, names)
         header = ReplayHeader(
@@ -147,7 +175,8 @@ class SessionStore:
             id=uuid.uuid4().hex,
             state=state,
             human_player=human_player,
-            opponent=opponent,
+            agents=agents,
+            seat_names=names,
             rng=random.Random(seed ^ _RNG_SALT),
             writer=ReplayWriter(path, header),
             legal_cache=list(legal_moves(state)),
@@ -165,10 +194,10 @@ class SessionStore:
 
 
 def _unique_replay_path(
-    replay_dir: Path, started_at: str, seed: int, names: tuple[str, str]
+    replay_dir: Path, started_at: str, seed: int, names: tuple[str, ...]
 ) -> Path:
-    """Same naming convention as game.match: <started_at>_<seed>_<p0>-vs-<p1>.jsonl."""
-    raw = f"{started_at}_{seed}_{names[0]}-vs-{names[1]}"
+    """Same naming convention as game.match: <started_at>_<seed>_<p0>-vs-<p1>[-vs-...].jsonl."""
+    raw = f"{started_at}_{seed}_{'-vs-'.join(names)}"
     base = re.sub(r"[^A-Za-z0-9._-]", "-", raw)
     path = replay_dir / f"{base}.jsonl"
     counter = 1

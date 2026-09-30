@@ -89,7 +89,8 @@ def test_full_game_vs_random_writes_verified_replay(
 
     assert state["terminal"] is True
     assert len(state["final_scores"]) == 2
-    assert last["ai_move"] is None or last["ai_move"]["move"] is not None
+    assert len(last["ai_moves"]) <= 1  # 2-player: at most the one AI reply
+    assert all(m["seat"] == 1 and m["move"] is not None for m in last["ai_moves"])
 
     # game end announces the replay file, which loads and engine-verifies
     name = last["replay"]
@@ -253,7 +254,7 @@ def test_hints_do_not_perturb_the_game_trajectory(client: TestClient) -> None:
         moved_h = client.post(f"/api/games/{hinted}/move", json={"idx": 0}).json()
         moved_c = client.post(f"/api/games/{clean}/move", json={"idx": 0}).json()
         # compare the moves themselves, not annots (think_ms is wall-clock)
-        assert (moved_h["ai_move"] or {}).get("move") == (moved_c["ai_move"] or {}).get("move")
+        assert [m["move"] for m in moved_h["ai_moves"]] == [m["move"] for m in moved_c["ai_moves"]]
         assert moved_h["state"]["scores"] == moved_c["state"]["scores"]
         if moved_h["state"]["terminal"]:
             break
@@ -288,10 +289,51 @@ def test_session_store_evicts_and_closes_abandoned_writers(tmp_path: Path) -> No
     from carcassonne.web.sessions import _MAX_SESSIONS, SessionStore
 
     store = SessionStore(replays_dir=tmp_path)
-    ids = [store.create("random", 0, seed).id for seed in range(_MAX_SESSIONS + 3)]
+    ids = [store.create(["random"], 0, seed).id for seed in range(_MAX_SESSIONS + 3)]
     assert len(store._sessions) <= _MAX_SESSIONS
     # evicted sessions are gone and their replay files exist as crash artifacts
     evicted = [gid for gid in ids if gid not in store._sessions]
     assert evicted
     artifacts = list(tmp_path.glob("*.jsonl"))
     assert len(artifacts) == len(ids)  # every session wrote its header line
+
+
+# --- N-seat sessions --------------------------------------------------------
+
+
+def test_three_player_game_end_to_end(client: TestClient, replays_dir: Path) -> None:
+    r = client.post(
+        "/api/games",
+        json={"opponents": ["random", "random"], "num_players": 3, "human_player": 1, "seed": 7},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["seats"] == ["random", "human", "random"]
+    # AI seat 0 has already moved; it is now the human's turn (seat 1)
+    assert body["state"]["current_player"] == 1
+    assert [m["seat"] for m in body["ai_moves"]] == [0]
+    game_id = body["game_id"]
+    state = body["state"]
+    while not state["terminal"]:
+        moved = client.post(f"/api/games/{game_id}/move", json={"idx": 0})
+        assert moved.status_code == 200
+        state = moved.json()["state"]
+    assert len(state["final_scores"]) == 3
+    (path,) = replays_dir.glob("*.jsonl")
+    replay = load_replay(path)
+    assert replay.header.config.num_players == 3
+    list(replay_states(replay))
+
+
+def test_checkpoint_opponents_rejected_beyond_two_players(client: TestClient) -> None:
+    r = client.post(
+        "/api/games",
+        json={"opponents": ["random", "ckpt:step_000100"], "num_players": 3},
+    )
+    assert r.status_code == 422
+
+
+def test_legacy_two_player_body_still_works(client: TestClient) -> None:
+    r = client.post("/api/games", json={"opponent": "random", "human_player": 0, "seed": 3})
+    assert r.status_code == 200
+    assert r.json()["seats"] == ["human", "random"]

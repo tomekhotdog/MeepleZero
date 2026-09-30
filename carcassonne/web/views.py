@@ -87,8 +87,12 @@ def legal_moves_view(moves: list[Move]) -> dict[str, Any]:
     return {"moves": [{**move_to_json(m), "idx": i} for i, m in enumerate(moves)]}
 
 
-def ai_move_view(move: Move, annot: Annot | None) -> dict[str, Any]:
-    return {"move": move_to_json(move), "annot": None if annot is None else annot_to_json(annot)}
+def ai_move_view(seat: int, move: Move, annot: Annot | None) -> dict[str, Any]:
+    return {
+        "seat": seat,
+        "move": move_to_json(move),
+        "annot": None if annot is None else annot_to_json(annot),
+    }
 
 
 def hint_view(legal: list[Move], annot: Annot | None) -> dict[str, Any]:
@@ -147,7 +151,10 @@ def replay_header_view(header: ReplayHeader) -> dict[str, Any]:
     return {
         "v": header.v,
         "seed": header.seed,
-        "config": {"meeples_per_player": header.config.meeples_per_player},
+        "config": {
+            "num_players": header.config.num_players,
+            "meeples_per_player": header.config.meeples_per_player,
+        },
         "agents": list(header.agents),
         "checkpoint": header.checkpoint,
         "started_at": header.started_at,
