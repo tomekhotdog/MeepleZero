@@ -39,6 +39,16 @@ def _tiny_net() -> CarcassonneNet:
     return CarcassonneNet(channels=16, n_blocks=2).eval()
 
 
+def test_from_arch_defaults_and_round_trip() -> None:
+    """One source of truth for the arch: {} gives the default net; a stored arch
+    rebuilds the same shape (the checkpoint and run-config paths both use this)."""
+    default = CarcassonneNet()
+    assert param_count(CarcassonneNet.from_arch({})) == param_count(default)
+    arch = {"num_planes": NUM_PLANES, "channels": 16, "n_blocks": 2}
+    net = CarcassonneNet.from_arch(arch)
+    assert (net.num_planes, net.channels, net.n_blocks) == (NUM_PLANES, 16, 2)
+
+
 def test_param_budget() -> None:
     assert param_count(CarcassonneNet()) <= 250_000  # design bar; expect ~192k
 

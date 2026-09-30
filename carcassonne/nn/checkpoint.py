@@ -103,12 +103,7 @@ def load(
         )
 
     if net is None:
-        arch = payload["net_arch"]
-        net = CarcassonneNet(
-            num_planes=arch["num_planes"],
-            channels=arch["channels"],
-            n_blocks=arch["n_blocks"],
-        )
+        net = CarcassonneNet.from_arch(payload["net_arch"])
     net.load_state_dict(payload["model_state"])
     net.to(device)
 

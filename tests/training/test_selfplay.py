@@ -17,7 +17,7 @@ from carcassonne.nn.actions import key_move, move_key
 from carcassonne.nn.model import CarcassonneNet
 from carcassonne.training.buffer import ReplayBuffer
 from carcassonne.training.run import TrainingRun
-from carcassonne.training.selfplay import play_selfplay_game
+from carcassonne.training.selfplay import _winner, play_selfplay_game
 
 DEVICE = torch.device("cpu")
 
@@ -95,3 +95,13 @@ def test_choose_with_policy_single_search_matches_chosen_move() -> None:
     assert annot.sims == 4
     # every policy move round-trips through the world-key codec (self-play stores keys).
     assert all(key_move(move_key(m)) == m for m in policy)
+
+
+def test_winner_refuses_non_two_player_scores() -> None:
+    """The +1/-1/0 outcome labels are 2-player negamax targets; a 3-player score
+    tuple must fail loud here rather than silently crown seat 0 or 1."""
+    assert _winner((5, 3)) == 0
+    assert _winner((3, 5)) == 1
+    assert _winner((4, 4)) is None
+    with pytest.raises(ValueError, match="2-player"):
+        _winner((1, 9, 2))

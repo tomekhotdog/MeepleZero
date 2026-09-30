@@ -85,7 +85,10 @@ def play_selfplay_game(
 
 
 def _winner(scores: tuple[int, ...]) -> int | None:
-    # 2-player only, on purpose: MctsAgent raises on any other player count.
+    # 2-player only, on purpose (MctsAgent also raises on any other player count);
+    # guarded here too so this function's contract doesn't hinge on its caller.
+    if len(scores) != 2:
+        raise ValueError(f"self-play outcome is 2-player only; got {len(scores)} scores")
     if scores[0] == scores[1]:
         return None
     return 0 if scores[0] > scores[1] else 1

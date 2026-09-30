@@ -38,7 +38,6 @@ import dataclasses
 import json
 import random
 from dataclasses import dataclass
-from typing import Any
 
 import numpy as np
 import torch
@@ -50,13 +49,10 @@ from carcassonne.core.state import Board, PlacedTile
 from carcassonne.core.types import Move, Pos, Rotation
 from carcassonne.nn import checkpoint
 from carcassonne.nn.actions import ACTIONS_PER_CELL, Crop, Key, flat_index, legal_mask, rotate_key
-from carcassonne.nn.encode import NUM_PLANES, encode_state, valid_mask
+from carcassonne.nn.encode import encode_state, valid_mask
 from carcassonne.nn.model import CarcassonneNet
 from carcassonne.training.buffer import ReplayBuffer, SampledExample
 from carcassonne.training.run import TrainingRun
-
-_DEFAULT_CHANNELS = 48
-_DEFAULT_N_BLOCKS = 4
 
 
 @dataclass
@@ -111,7 +107,8 @@ class Learner:
                 learner._optimizer.load_state_dict(opt_state)
             learner._step = int(payload["step"])
             return learner
-        return cls(_net_from_config(run.config()), buffer, run, config, rng)
+        net = CarcassonneNet.from_arch(run.config().get("net_arch", {}))
+        return cls(net, buffer, run, config, rng)
 
     @property
     def step(self) -> int:
@@ -284,12 +281,3 @@ def rotate_state_90(state: GameState) -> GameState:
 
     abbot_at = tuple(rot_node(n) for n in state.abbot_at)
     return dataclasses.replace(state, board=board, features=idx, abbot_at=abbot_at)
-
-
-def _net_from_config(cfg: dict[str, Any]) -> CarcassonneNet:
-    arch: dict[str, Any] = cfg.get("net_arch", {})
-    return CarcassonneNet(
-        num_planes=int(arch.get("num_planes", NUM_PLANES)),
-        channels=int(arch.get("channels", _DEFAULT_CHANNELS)),
-        n_blocks=int(arch.get("n_blocks", _DEFAULT_N_BLOCKS)),
-    )

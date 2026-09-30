@@ -18,7 +18,8 @@ sees the same zeros as implicit zero-padding.
 from __future__ import annotations
 
 import math
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
+from typing import Any
 
 import numpy as np
 import torch
@@ -141,6 +142,16 @@ class CarcassonneNet(nn.Module):
         self.value_conv = nn.Conv2d(channels, _VALUE_CHANNELS, kernel_size=1)
         self.value_fc1 = nn.Linear(_VALUE_CHANNELS, _VALUE_HIDDEN)
         self.value_fc2 = nn.Linear(_VALUE_HIDDEN, 1)
+
+    @classmethod
+    def from_arch(cls, arch: Mapping[str, Any]) -> CarcassonneNet:
+        """Build a net from an arch dict (``num_planes``/``channels``/``n_blocks``,
+        as stored in a checkpoint or a run config); missing keys take the defaults."""
+        return cls(
+            num_planes=int(arch.get("num_planes", NUM_PLANES)),
+            channels=int(arch.get("channels", _DEFAULT_CHANNELS)),
+            n_blocks=int(arch.get("n_blocks", _DEFAULT_N_BLOCKS)),
+        )
 
     def forward(
         self,
