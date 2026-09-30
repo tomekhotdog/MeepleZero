@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -67,6 +68,13 @@ def _build_parser() -> argparse.ArgumentParser:
     tr.add_argument("--gate-games", type=int, default=20, help="games per arena gate")
     tr.add_argument("--window-games", type=int, default=2000, help="replay-buffer eviction window")
     tr.add_argument("--seed", type=int, default=0, help="base seed")
+    tr.add_argument(
+        "--workers",
+        type=int,
+        default=0,
+        help="self-play worker processes (0 = one per CPU core); "
+        "always taken from this invocation, never from a resumed run's config",
+    )
     tr.add_argument(
         "--device", choices=["auto", "cpu"], default="auto", help="compute device (default auto)"
     )
@@ -189,6 +197,7 @@ def _train(args: argparse.Namespace) -> int:
         channels=args.channels,
         n_blocks=args.n_blocks,
         seed=args.seed,
+        workers=args.workers or (os.cpu_count() or 1),
     )
 
     run_dir: Path = args.run

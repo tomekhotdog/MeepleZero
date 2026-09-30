@@ -29,9 +29,13 @@ promoted one from ``train_state.json`` -- so gating discipline survives restarts
 iteration's un-checkpointed steps; a clean stop (SIGINT/SIGTERM or ``should_stop``)
 finishes the current iteration, flushes a checkpoint, and returns.
 
-Self-play is sequential here. Multiprocessing workers (design note) are a future
-optimisation deliberately not built now -- sequential keeps the loop, and the
-smoke test, simple and fast.
+**Self-play workers.** With ``workers == 1`` self-play runs in-process. With
+``workers > 1`` it runs on a :class:`SelfplayPool` of spawned processes, each
+holding a copy of the best net; the pool is created lazily, closed and dropped on
+promotion (its net is baked in at start) so the next iteration rebuilds it from
+the promoted net, and closed on exit. Seeds and game ids are derived identically
+in both modes, and the parent alone inserts into the buffer, so the data does not
+depend on the worker count (a run may resume on a machine with a different one).
 """
 
 from __future__ import annotations
@@ -54,6 +58,7 @@ from carcassonne.nn.model import CarcassonneNet
 from carcassonne.training.arena import gate, yardstick
 from carcassonne.training.buffer import ReplayBuffer
 from carcassonne.training.learner import Learner, LearnerConfig
+from carcassonne.training.pool import Job, SelfplayPool
 from carcassonne.training.run import TrainingRun
 from carcassonne.training.selfplay import play_selfplay_game
 
@@ -80,6 +85,7 @@ class TrainConfig:
     weight_decay: float = 1e-4
     batch_size: int = 256
     ckpt_every: int = 100
+    workers: int = 1  # self-play processes; 1 = in-process (no pool)
 
 
 def run_config_dict(cfg: TrainConfig) -> dict[str, object]:
@@ -100,6 +106,7 @@ def run_config_dict(cfg: TrainConfig) -> dict[str, object]:
             "weight_decay": cfg.weight_decay,
             "batch_size": cfg.batch_size,
             "ckpt_every": cfg.ckpt_every,
+            "workers": cfg.workers,
         },
     }
 
@@ -155,6 +162,7 @@ def train(
 
     with _StopSignal() as stop:
         buffer = ReplayBuffer(run.buffer_path)
+        pool: SelfplayPool | None = None
         try:
             learner, best_net = _establish_nets(run, cfg, buffer, device)
             gate_cfg = MctsConfig(sims=cfg.mcts_sims)
@@ -170,21 +178,38 @@ def train(
                     break
 
                 # -- self-play (best net) -----------------------------------
-                for _ in range(cfg.selfplay_games_per_iter):
-                    started_at = datetime.now(UTC).isoformat(timespec="seconds")
-                    game_id = f"g{order_key:020d}"
-                    _, replay_path, examples = play_selfplay_game(
-                        net=best_net,
-                        device=device,
-                        seed=cfg.seed + game_counter,
-                        run=run,
-                        mcts_config=gate_cfg,
-                        game_id=game_id,
-                        started_at=started_at,
-                    )
-                    buffer.add_game(game_id, replay_path, examples, order_key)
-                    order_key += 1
-                    game_counter += 1
+                # Both paths derive seed / game_id / order_key identically, so a
+                # game's content never depends on the worker count.
+                if cfg.workers > 1:
+                    if pool is None:
+                        pool = SelfplayPool(cfg.workers, best_net, gate_cfg, run.root)
+                    jobs: list[Job] = []
+                    keys: dict[str, int] = {}
+                    for _ in range(cfg.selfplay_games_per_iter):
+                        started_at = datetime.now(UTC).isoformat(timespec="seconds")
+                        game_id = f"g{order_key:020d}"
+                        jobs.append((cfg.seed + game_counter, game_id, started_at))
+                        keys[game_id] = order_key
+                        order_key += 1
+                        game_counter += 1
+                    for game_id, replay_path, examples in pool.play(jobs):
+                        buffer.add_game(game_id, replay_path, examples, keys[game_id])
+                else:
+                    for _ in range(cfg.selfplay_games_per_iter):
+                        started_at = datetime.now(UTC).isoformat(timespec="seconds")
+                        game_id = f"g{order_key:020d}"
+                        _, replay_path, examples = play_selfplay_game(
+                            net=best_net,
+                            device=device,
+                            seed=cfg.seed + game_counter,
+                            run=run,
+                            mcts_config=gate_cfg,
+                            game_id=game_id,
+                            started_at=started_at,
+                        )
+                        buffer.add_game(game_id, replay_path, examples, order_key)
+                        order_key += 1
+                        game_counter += 1
                 buffer.evict_to(cfg.window_games)
                 _write_state(run, games_generated=game_counter)
 
@@ -195,13 +220,18 @@ def train(
 
                 # -- gate (learning vs best) --------------------------------
                 gated = it % cfg.gate_every == 0
-                if gated:
-                    _gate_and_maybe_promote(run, cfg, learner, best_net, device, gate_cfg, it)
+                if gated and _gate_and_maybe_promote(
+                    run, cfg, learner, best_net, device, gate_cfg, it
+                ) and pool is not None:
+                    pool.close()
+                    pool = None  # recreated next iteration with the promoted net
 
                 _print_progress(it, buffer, last, gated)
 
             learner.checkpoint()  # clean-stop flush: always resumable
         finally:
+            if pool is not None:
+                pool.close()
             buffer.close()
 
 
@@ -277,7 +307,8 @@ def _gate_and_maybe_promote(
     device: torch.device,
     gate_cfg: MctsConfig,
     it: int,
-) -> None:
+) -> bool:
+    """Run the gate + yardstick, promote on a win; return whether it promoted."""
     wr_best, promoted = gate(
         learner.net, best_net, device, gate_cfg, cfg.gate_games, _GATE_SEED_BASE + it
     )
@@ -305,6 +336,7 @@ def _gate_and_maybe_promote(
         f"wr_best={wr_best:.1%} wr_greedy={wr_greedy:.1%} "
         f"{'PROMOTED' if promoted else 'kept best'}"
     )
+    return promoted
 
 
 def _append_gate_line(run: TrainingRun, line: dict[str, object]) -> None:
