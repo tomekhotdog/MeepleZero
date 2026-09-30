@@ -63,7 +63,11 @@ class MctsConfig:
     noise_frac: float = 0.25
     temp_turns: int = 12  # sample with temperature while turn < this, then argmax
     temp: float = 1.0
-    reuse_tree: bool = True  # carry the committed child's subtree into the next search
+    # Carry the committed child's subtree into the next search. Assumes every
+    # choose/choose_with_policy call is *played*: a speculative call (e.g. a hint)
+    # leaves a stash that biases the next search, so interactive agents disable
+    # reuse (see agents/checkpoints.py).
+    reuse_tree: bool = True
 
 
 _DEFAULT_CONFIG = MctsConfig()  # shared immutable default (frozen dataclass)
@@ -139,6 +143,11 @@ class MctsAgent:
     # -- Agent protocol -----------------------------------------------------
 
     def choose(self, state: GameState, ctx: TurnContext) -> tuple[Move, Annot | None]:
+        """Search ``state`` and return the move to play (+ annotation if asked).
+
+        With ``reuse_tree`` on, the returned move is assumed to be *played*: its
+        subtree is stashed for the next search, so a speculative call (e.g. for a
+        hint) biases it -- interactive agents disable reuse (agents/checkpoints.py)."""
         _require_two_players(state)
         start = time.perf_counter()
         rng = np.random.default_rng(ctx.rng.getrandbits(64))
@@ -146,7 +155,7 @@ class MctsAgent:
 
         move_idx = self._pick_move(root, state.turn, rng)
         move = root.moves[move_idx]
-        self._stash = root.children.get(move_idx)
+        self._commit(root, move_idx)
         if not ctx.annotate:
             return move, None
 
@@ -169,7 +178,7 @@ class MctsAgent:
         root = self._search(state, rng, add_noise=self._self_play)
         move_idx = self._pick_move(root, state.turn, rng)
         move = root.moves[move_idx]
-        self._stash = root.children.get(move_idx)
+        self._commit(root, move_idx)
         think_ms = int((time.perf_counter() - start) * 1000)
         return move, self._annotate(root, think_ms), self._visit_dist(root)
 
@@ -204,7 +213,9 @@ class MctsAgent:
         its inherited visit counts, which therefore flow into the policy target
         (standard AlphaZero subtree reuse). A reused root still gets fresh
         Dirichlet noise; its priors are clean because only non-root nodes are
-        ever stashed, and noise is only ever mixed into the search root."""
+        ever stashed, and noise is only ever mixed into the search root. The
+        inherited visits (accumulated under clean priors) do dampen that fresh
+        noise's exploration effect -- standard AlphaZero subtree-reuse behaviour."""
         root = self._take_stash(root_state) if reuse and self._config.reuse_tree else None
         if root is None:
             root = self._make_node(root_state)
@@ -216,6 +227,10 @@ class MctsAgent:
         for _ in range(self._config.sims):
             self._simulate(root)
         return root
+
+    def _commit(self, root: _Node, move_idx: int) -> None:
+        """Stash the played child's subtree for the next search (reuse on only)."""
+        self._stash = root.children.get(move_idx) if self._config.reuse_tree else None
 
     def _take_stash(self, state: GameState) -> _Node | None:
         """Consume the stashed subtree if it matches ``state``.
@@ -333,4 +348,7 @@ class MctsAgent:
         top = tuple(
             (root.moves[i], float(root.prior[i]), int(root.n[i])) for i in order
         )
-        return Annot(value=value, sims=self._config.sims, think_ms=think_ms, top=top)
+        # sims = total root visits, not the configured budget: a reused root's counts
+        # include inherited visits, and the annot must say what they came from. For a
+        # fresh root this equals config.sims exactly (each sim adds one root visit).
+        return Annot(value=value, sims=total, think_ms=think_ms, top=top)

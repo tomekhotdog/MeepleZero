@@ -287,21 +287,90 @@ def test_tree_reuse_carries_visits_across_moves() -> None:
 
 
 def test_tree_reuse_misses_on_unrelated_state() -> None:
+    """A stash that matches neither the state nor its children must be ignored
+    (fresh root, exactly ``sims`` visits) and consumed, not carried forward."""
     net = _net()
     agent = MctsAgent(net, DEVICE, MctsConfig(sims=4, reuse_tree=True))
     ctx = TurnContext(rng=random.Random(0), annotate=False)
     agent.choose(new_game(0, GameConfig()), ctx)
-    # A different game must not match the stash -- fresh root, no crash.
-    move, _ = agent.choose(new_game(99, GameConfig()), ctx)
-    assert move in legal_moves(new_game(99, GameConfig()))
+    old = agent._stash  # noqa: SLF001
+    assert old is not None
+    unrelated = new_game(99, GameConfig())
+    root = agent._search(unrelated, np.random.default_rng(0), add_noise=False)  # noqa: SLF001
+    assert root is not old
+    assert int(root.n.sum()) == 4  # fresh root: nothing inherited
+    assert agent._stash is None  # noqa: SLF001 -- the stale stash was consumed
+
+    agent._stash = old  # noqa: SLF001 -- replay the stale stash through choose()
+    move, _ = agent.choose(unrelated, ctx)
+    assert move in legal_moves(unrelated)
+    new = agent._stash  # noqa: SLF001
+    assert new is not None and new is not old
+    assert new.state == apply(unrelated, move)  # re-stashed from the NEW tree
 
 
-def test_reuse_off_matches_old_behaviour() -> None:
+def test_reuse_off_never_stashes_or_inherits() -> None:
     net = _net()
-    cfg = MctsConfig(sims=8, reuse_tree=False)
-    a1 = MctsAgent(net, DEVICE, cfg)
-    a2 = MctsAgent(net, DEVICE, cfg)
+    sims = 64
+    off = MctsAgent(net, DEVICE, MctsConfig(sims=sims, reuse_tree=False))
     state = new_game(3, GameConfig())
-    m1, _ = a1.choose(state, TurnContext(rng=random.Random(1), annotate=False))
-    m2, _ = a2.choose(state, TurnContext(rng=random.Random(1), annotate=False))
-    assert m1 == m2  # stateless determinism preserved when reuse is off
+    move, _ = off.choose(state, TurnContext(rng=random.Random(1)))
+    assert off._stash is None  # noqa: SLF001
+    off.choose_with_policy(state, TurnContext(rng=random.Random(1)))
+    assert off._stash is None  # noqa: SLF001
+
+    # Even a matching stash planted from a reuse-on agent must not be inherited.
+    on = MctsAgent(net, DEVICE, MctsConfig(sims=sims, reuse_tree=True))
+    move, _ = on.choose(state, TurnContext(rng=random.Random(1)))
+    planted = on._stash  # noqa: SLF001
+    assert planted is not None and int(planted.n.sum()) > 0  # premise: would be reusable
+    off._stash = planted  # noqa: SLF001
+    root = off._search(apply(state, move), np.random.default_rng(0), add_noise=False)  # noqa: SLF001
+    assert root is not planted
+    assert int(root.n.sum()) == sims  # fresh root, nothing inherited
+
+
+def test_tree_reuse_finds_grandchild_after_opponent_move() -> None:
+    """Arena/web case: the opponent moved once since our committed move, so the
+    new root must be the grandchild our last search already expanded."""
+    sims = 64
+    agent = MctsAgent(_net(), DEVICE, MctsConfig(sims=sims, reuse_tree=True))
+    s0 = new_game(0, GameConfig())
+    agent.choose(s0, TurnContext(rng=random.Random(0)))
+    stash = agent._stash  # noqa: SLF001
+    assert stash is not None
+    candidates = [c for c in stash.children.values() if not c.terminal]
+    assert candidates, "premise: the search expanded an opponent reply"
+    grandchild = max(candidates, key=lambda c: int(c.n.sum()))
+    inherited = int(grandchild.n.sum())
+    assert inherited > 0  # premise: the reuse carries real visits
+    root = agent._search(grandchild.state, np.random.default_rng(0), add_noise=False)  # noqa: SLF001
+    assert root is grandchild
+    assert int(root.n.sum()) == inherited + sims
+
+
+def test_visit_policy_leaves_play_stash_untouched() -> None:
+    agent = MctsAgent(_net(), DEVICE, MctsConfig(sims=16, reuse_tree=True))
+    state = new_game(0, GameConfig())
+    move, _ = agent.choose(state, TurnContext(rng=random.Random(0)))
+    stash = agent._stash  # noqa: SLF001
+    assert stash is not None
+    agent.visit_policy(apply(state, move))  # a hint on the very state the stash matches
+    assert agent._stash is stash  # noqa: SLF001
+
+
+def test_reused_root_annot_reports_total_visits() -> None:
+    """Annot.sims must say how many visits the shown counts came from: on a reused
+    root that is inherited + this search's sims, not the configured budget."""
+    sims = 64
+    agent = MctsAgent(_net(), DEVICE, MctsConfig(sims=sims, reuse_tree=True))
+    s0 = new_game(0, GameConfig())
+    move, _ = agent.choose(s0, TurnContext(rng=random.Random(0)))
+    stash = agent._stash  # noqa: SLF001
+    assert stash is not None
+    inherited = int(stash.n.sum())
+    assert inherited > 0  # premise: the reused root carries visits
+    s1 = apply(s0, move)
+    _, annot = agent.choose(s1, TurnContext(rng=random.Random(1), annotate=True))
+    assert annot is not None
+    assert annot.sims == inherited + sims > sims

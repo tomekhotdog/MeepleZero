@@ -144,3 +144,17 @@ def test_checkpoint_id_path_traversal_is_rejected(client: TestClient) -> None:
     for evil in ("ckpt:../../etc/passwd", "ckpt:../secret", r"ckpt:..\\secret"):
         r = client.post("/api/games", json={"opponent": evil, "human_player": 0, "seed": 1})
         assert r.status_code == 422, evil
+
+
+def test_checkpoint_agent_disables_tree_reuse(checkpoints_dir: Path) -> None:
+    """Interactive agents serve hints via speculative searches, so subtree reuse
+    (which assumes every choose() is played) must be off."""
+    from carcassonne.agents.mcts import MctsAgent
+
+    checkpoints.set_checkpoints_dir(checkpoints_dir)
+    try:
+        agent = checkpoints.make_checkpoint_agent("ckpt:latest")
+    finally:
+        checkpoints.set_checkpoints_dir(None)
+    assert isinstance(agent, MctsAgent)
+    assert agent._config.reuse_tree is False  # noqa: SLF001
