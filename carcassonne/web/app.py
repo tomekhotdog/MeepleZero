@@ -24,7 +24,7 @@ from carcassonne.core import IllegalMove, RulesError
 from carcassonne.game.replay import load_replay, replay_states
 from carcassonne.training.run import TrainingRun
 from carcassonne.web import views
-from carcassonne.web.sessions import NotFound, SessionStore, UnknownOpponent
+from carcassonne.web.sessions import HintUnavailable, NotFound, SessionStore, UnknownOpponent
 
 _REPLAY_NAME = re.compile(r"[A-Za-z0-9._-]+\.jsonl")
 # A run name is a directory basename: a leading dot is disallowed so "." and
@@ -189,6 +189,7 @@ def _register_error_handlers(app: FastAPI) -> None:
         app.add_exception_handler(exc_type, handle)
 
     register(IllegalMove, 409, "illegal_move")
+    register(HintUnavailable, 409, "hint_unavailable")
     register(NotFound, 404, "not_found")
     register(RulesError, 400, "replay_verification_failed")
     register(UnknownOpponent, 422, "unknown_opponent")

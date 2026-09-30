@@ -43,6 +43,10 @@ class UnknownOpponent(Exception):
     """Unknown agent spec in game creation -> HTTP 422."""
 
 
+class HintUnavailable(Exception):
+    """Hint asked for in a game with several AI seats -> HTTP 409."""
+
+
 @dataclass
 class Session:
     id: str
@@ -86,11 +90,14 @@ class Session:
     def hint_annot(self) -> Annot | None:
         """The opponent's read on the human's current position (2-player only).
 
-        With several AI seats there is no single "opponent" to ask, so None.
+        With several AI seats there is no single "opponent" to ask, so
+        HintUnavailable. None means the opponent doesn't annotate (e.g. random).
         Uses a throwaway rng: hints must not perturb the session's agent rng
         stream, or replays would depend on how often the human peeked."""
         if len(self.agents) != 1:
-            return None
+            raise HintUnavailable(
+                f"hints are a 2-player feature (this game has {len(self.seat_names)} players)"
+            )
         opponent = next(iter(self.agents.values()))
         _, annot = opponent.choose(self.state, TurnContext(random.Random(0), annotate=True))
         return annot

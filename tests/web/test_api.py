@@ -331,6 +331,22 @@ def test_checkpoint_opponents_rejected_beyond_two_players(client: TestClient) ->
         json={"opponents": ["random", "ckpt:step_000100"], "num_players": 3},
     )
     assert r.status_code == 422
+    # the guard's own message, not make_agent's "no checkpoints directory" 422
+    assert "2-player only" in r.json()["explanation"]
+
+
+def test_hint_in_three_player_game_is_an_explicit_409(client: TestClient) -> None:
+    """No single opponent to ask: an explicit refusal, never a fabricated uniform hint."""
+    r = client.post(
+        "/api/games",
+        json={"opponents": ["random", "random"], "num_players": 3, "human_player": 0, "seed": 5},
+    )
+    hint = client.get(f"/api/games/{r.json()['game_id']}/hint")
+    assert hint.status_code == 409
+    assert hint.json() == {
+        "error": "hint_unavailable",
+        "explanation": "hints are a 2-player feature (this game has 3 players)",
+    }
 
 
 def test_legacy_two_player_body_still_works(client: TestClient) -> None:
