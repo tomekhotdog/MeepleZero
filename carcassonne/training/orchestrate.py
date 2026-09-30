@@ -28,6 +28,8 @@ promoted one from ``train_state.json`` -- so gating discipline survives restarts
 (critical on the Pi, which resumes many times). A crash loses at most the current
 iteration's un-checkpointed steps; a clean stop (SIGINT/SIGTERM or ``should_stop``)
 finishes the current iteration, flushes a checkpoint, and returns.
+``games_generated`` is persisted after *every* buffer insert, so a failure part-way
+through self-play never makes a resume replay the seeds of games already stored.
 
 **Self-play workers.** With ``workers == 1`` self-play runs in-process. With
 ``workers > 1`` it runs on a :class:`SelfplayPool` of spawned processes, each
@@ -35,16 +37,24 @@ holding a copy of the best net; the pool is created lazily, closed and dropped o
 promotion (its net is baked in at start) so the next iteration rebuilds it from
 the promoted net, and closed on exit. Seeds and game ids are derived identically
 in both modes, and the parent alone inserts into the buffer, so the data does not
-depend on the worker count (a run may resume on a machine with a different one).
+depend on the worker count (a run may resume on a machine with a different one)
+-- exactly so at the same intra-op thread count (workers pin 1). A group-wide
+signal can kill a worker still in its spawn bootstrap (before it ignores
+signals); the resulting ``BrokenProcessPool`` with the stop flag set is the stop:
+the games already inserted are kept, the partial iteration's learn/gate phases
+are skipped (as a stop between iterations would), and the normal final
+checkpoint runs. Without the stop flag it propagates.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import random
 import signal
 import time
 from collections.abc import Callable
+from concurrent.futures.process import BrokenProcessPool
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from types import FrameType
@@ -155,12 +165,18 @@ def train(
     Stops when the iteration limit (``cfg.iterations`` or the tighter
     ``max_iterations``) is reached, a SIGINT/SIGTERM arrives, or ``should_stop()``
     returns True. The stop is checked between iterations so the current one always
-    finishes cleanly; a final checkpoint is always flushed before returning.
+    finishes cleanly -- except when the stop signal itself broke the self-play pool,
+    which ends self-play there and skips that iteration's learn/gate. A final
+    checkpoint is always flushed before returning.
     """
     device = device or checkpoint.pick_device()
     limit = cfg.iterations if max_iterations is None else min(cfg.iterations, max_iterations)
 
     with _StopSignal() as stop:
+
+        def stopping() -> bool:
+            return stop.is_set or (should_stop is not None and should_stop())
+
         buffer = ReplayBuffer(run.buffer_path)
         pool: SelfplayPool | None = None
         try:
@@ -168,13 +184,14 @@ def train(
             gate_cfg = MctsConfig(sims=cfg.mcts_sims)
             # order_key must strictly increase across resumes so newer games survive
             # eviction; wall-clock ns gives that. game_counter is the total games ever
-            # generated (persisted), so self-play seeds never repeat across resumes.
+            # inserted (persisted after each insert), so self-play seeds never repeat
+            # across resumes -- even after a failure part-way through an iteration.
             order_key = time.time_ns()
             state = _read_state(run)
             game_counter = state["games_generated"]
 
             for it in range(1, limit + 1):
-                if stop.is_set or (should_stop is not None and should_stop()):
+                if stopping():
                     break
 
                 # -- self-play (best net) -----------------------------------
@@ -185,15 +202,23 @@ def train(
                         pool = SelfplayPool(cfg.workers, best_net, gate_cfg, run.root)
                     jobs: list[Job] = []
                     keys: dict[str, int] = {}
-                    for _ in range(cfg.selfplay_games_per_iter):
+                    for i in range(cfg.selfplay_games_per_iter):
                         started_at = datetime.now(UTC).isoformat(timespec="seconds")
-                        game_id = f"g{order_key:020d}"
-                        jobs.append((cfg.seed + game_counter, game_id, started_at))
-                        keys[game_id] = order_key
-                        order_key += 1
-                        game_counter += 1
-                    for game_id, replay_path, examples in pool.play(jobs):
-                        buffer.add_game(game_id, replay_path, examples, keys[game_id])
+                        game_id = f"g{order_key + i:020d}"
+                        jobs.append((cfg.seed + game_counter + i, game_id, started_at))
+                        keys[game_id] = order_key + i
+                    order_key += cfg.selfplay_games_per_iter
+                    try:
+                        # Results arrive in submission order, so after the k-th
+                        # insert the persisted counter covers exactly jobs[:k].
+                        for game_id, replay_path, examples in pool.play(jobs):
+                            buffer.add_game(game_id, replay_path, examples, keys[game_id])
+                            game_counter += 1
+                            _write_state(run, games_generated=game_counter)
+                    except BrokenProcessPool:
+                        if not stopping():
+                            raise
+                        break  # a stop signal killed a still-booting worker: stop now
                 else:
                     for _ in range(cfg.selfplay_games_per_iter):
                         started_at = datetime.now(UTC).isoformat(timespec="seconds")
@@ -210,8 +235,8 @@ def train(
                         buffer.add_game(game_id, replay_path, examples, order_key)
                         order_key += 1
                         game_counter += 1
+                        _write_state(run, games_generated=game_counter)
                 buffer.evict_to(cfg.window_games)
-                _write_state(run, games_generated=game_counter)
 
                 # -- learn (learning net) -----------------------------------
                 last: dict[str, float] = {}
@@ -220,9 +245,10 @@ def train(
 
                 # -- gate (learning vs best) --------------------------------
                 gated = it % cfg.gate_every == 0
-                if gated and _gate_and_maybe_promote(
+                promoted = gated and _gate_and_maybe_promote(
                     run, cfg, learner, best_net, device, gate_cfg, it
-                ) and pool is not None:
+                )
+                if promoted and pool is not None:
                     pool.close()
                     pool = None  # recreated next iteration with the promoted net
 
@@ -288,15 +314,19 @@ def _read_state(run: TrainingRun) -> dict[str, int]:
 
 def _write_state(run: TrainingRun, *, best_step: int | None = None,
                  games_generated: int | None = None) -> None:
-    """Merge-update the persisted run state (last promoted step, total games)."""
+    """Merge-update the persisted run state (last promoted step, total games).
+
+    Written once per self-play game, so it is replaced atomically (temp file +
+    ``os.replace``): a kill mid-write must not leave a truncated file."""
     state = _read_state(run)
     if best_step is not None:
         state["best_step"] = best_step
     if games_generated is not None:
         state["games_generated"] = games_generated
-    (run.root / "train_state.json").write_text(
-        json.dumps(state, separators=(",", ":")), encoding="utf-8"
-    )
+    path = run.root / "train_state.json"
+    tmp = path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(state, separators=(",", ":")), encoding="utf-8")
+    os.replace(tmp, path)
 
 
 def _gate_and_maybe_promote(
