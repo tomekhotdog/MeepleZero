@@ -45,6 +45,19 @@
   lost — HEAD ended correct, 174 tests green. The venv/`.pth` iCloud issue above
   is real and independent.
 
+- [decision] 2026-09-30 — **MCTS subtree reuse is ON for training/arena, OFF for
+  interactive checkpoint agents** (`agents/checkpoints.py` builds
+  `MctsConfig(..., reuse_tree=False)`). Reuse exists for self-play throughput.
+  But the web's hint path calls `opponent.choose()` (the Agent protocol has no
+  side-effect-free "analyse" method), so with reuse a hint's search left a
+  stashed subtree that the AI's next reply inherited — asking for a hint changed
+  the game (4/80 seeds diverged). Rejected: a reuse-free MctsAgent method for
+  hints (pierces the Agent-protocol boundary decided above) and save/restore of
+  the private `_stash` from the web layer. Bonus: the RL microscope stays exact —
+  visits == sims. Do not "re-enable reuse for stronger web play" without first
+  giving hints a genuinely side-effect-free path; the seeded
+  `test_repeated_hints_do_not_perturb_checkpoint_game` will fail if you do.
+
 - [rule] 2026-08-23 — **Document-style pages under the app shell need their own
   scroll container.** The web shell sets `html, body { height: 100%; overflow:
   hidden }` on purpose — Play/Replay/Training are fixed-viewport layouts whose
