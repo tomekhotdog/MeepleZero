@@ -4,7 +4,7 @@
 // board canvas redraws fully every animation frame (boards are tiny). All
 // server contracts are consumed exactly as produced by web/views.py.
 
-import { TOKENS, drawTile, drawMeepleGlyph, featureAnchor } from "./tiles.js";
+import { TOKENS, drawTile, drawMeepleGlyph, featureAnchor, playerColor } from "./tiles.js";
 import {
   cellPx as boardCellPx,
   worldToScreen as boardWorldToScreen,
@@ -39,6 +39,8 @@ const S = {
   rotation: 0, // current lens rotation, 0..3 clockwise
   lensDeg: 0, // cumulative CSS rotation so 270->360 animates forward
   humanPlayer: 0,
+  seats: [], // per-seat names from the server ("human" at humanPlayer); length = player count
+  checkpoints: [], // [{id, step}] checkpoint opponents, offered only for 2-player games
   phase: "idle", // idle | placing | picking | awaiting | over
   pending: null, // {x, y, moves} while the radial picker is open
   hintOn: false,
@@ -46,11 +48,12 @@ const S = {
   hintEpoch: 0, // discard stale hint responses
   cam: { x: 0, y: 0, zoom: 1 },
   hover: null, // hovered board cell {x, y}
-  aiPulse: null, // {x, y, start} settle pulse on the AI's placed tile
+  aiPulse: null, // {x, y, start} settle pulse on the most recent AI placement
   drag: null,
   error: null, // fatal fetch failure message; overrides the status line until a new game
   lastHumanMove: null, // {x, y} of the human's most recent tile placement
-  lastAiMove: null, // {x, y} of the AI's most recent tile placement
+  lastAiMove: null, // {x, y} of the most recent AI tile placement (any AI seat)
+  lastAiSeat: null, // seat that made lastAiMove; colours its ring
   highlightTiles: new Set(), // "x,y" keys highlighted by a clicked score row (F2)
   highlightRow: null, // the currently-active score row button, or null
   highlightColor: null, // scoring player's colour for the active highlight
@@ -108,8 +111,12 @@ async function refreshLegal() {
   S.legal = data.moves;
 }
 
+// Hints are a 2-player feature: the server 409s them for 3-5 players, and the
+// hint row is hidden then, so never issue the request at all.
+const hintsAvailable = () => S.seats.length === 2;
+
 async function refreshHint() {
-  if (!S.hintOn || S.phase !== "placing") return;
+  if (!S.hintOn || S.phase !== "placing" || !hintsAvailable()) return;
   const epoch = ++S.hintEpoch;
   try {
     const hint = await api(`/api/games/${S.gameId}/hint`);
@@ -124,25 +131,38 @@ async function refreshHint() {
 
 // --- game flow -------------------------------------------------------------------
 
-async function newGame(opponent, seat, seed) {
-  const body = { opponent, human_player: seat };
+const SEAT_COLOR_NAMES = ["blue", "red", "purple", "pink", "yellow"];
+
+// `opponents` are the AI seats' agent specs in seat order (the human's seat is
+// skipped), so the table has opponents.length + 1 players.
+async function newGame(opponents, seat, seed) {
+  const body = { opponents, num_players: opponents.length + 1, human_player: seat };
   S.error = null;
   if (seed !== null) body.seed = seed;
   const data = await postJSON("/api/games", body);
   S.gameId = data.game_id;
   S.view = data.state;
+  S.seats = data.seats;
   S.humanPlayer = seat;
   S.pending = null;
   S.hint = null;
   S.aiPulse = null;
   S.lastHumanMove = null;
   S.lastAiMove = null;
+  S.lastAiSeat = null;
   S.hoverMeeple = null;
   clearScoreHighlight();
   S.cam = { x: 0, y: 0, zoom: 1 };
   setRotation(0, true);
   logEl.replaceChildren();
-  logMeta(`New game vs ${opponent} — you are ${seat === 0 ? "blue" : "red"}`);
+  $("cards").replaceChildren(); // rebuilt for this table's seat count
+  const hideHints = !hintsAvailable();
+  $("hint-row").hidden = hideHints;
+  $("value-readout").hidden = hideHints;
+  logMeta(`New game vs ${opponents.join(", ")} — you are ${SEAT_COLOR_NAMES[seat]}`);
+  // AI seats before the human's open the game. (The create response carries no
+  // score events for these moves, so nothing is logged for them.)
+  applyAiMoves(data.ai_moves);
   $("banner").classList.remove("show");
   await refreshLegal();
   S.phase = S.view.terminal ? "over" : "placing";
@@ -182,17 +202,9 @@ async function postMove(idx) {
   }
   if (S.gameId !== gameId) return;
   S.view = data.state;
+  // `events` is the human's move then every AI move's, in play order.
   for (const e of data.events) logScore(e);
-  if (data.ai_move) {
-    S.lastAiMove = { x: data.ai_move.move.x, y: data.ai_move.move.y }; // F1: mark the AI placement
-    if (!reducedMotion.matches) {
-      S.aiPulse = {
-        x: data.ai_move.move.x,
-        y: data.ai_move.move.y,
-        start: performance.now(),
-      };
-    }
-  }
+  applyAiMoves(data.ai_moves);
   setRotation(0, true); // fresh tile drawn: reset the lens
   if (S.view.terminal) {
     S.legal = [];
@@ -206,15 +218,56 @@ async function postMove(idx) {
   updateSidebar();
 }
 
+// (F1) Mark the most recent of a turn's consecutive AI moves: its ring (in that
+// seat's colour) and a brief settle pulse. Earlier AI moves in the same batch are
+// visible on the board and in the score log, but only the latest gets a ring.
+function applyAiMoves(aiMoves) {
+  const last = aiMoves.at(-1);
+  if (!last) return;
+  S.lastAiMove = { x: last.move.x, y: last.move.y };
+  S.lastAiSeat = last.seat;
+  if (!reducedMotion.matches) {
+    S.aiPulse = { x: last.move.x, y: last.move.y, start: performance.now() };
+  }
+}
+
+// Display name for a seat: "You" for the human, else the agent name. Repeated
+// agent names (two greedy seats) get a P<seat> suffix so they stay distinct.
+function seatName(seat) {
+  if (seat === S.humanPlayer) return "You";
+  const name = S.seats[seat] ?? `P${seat}`;
+  return S.seats.filter((n) => n === name).length > 1 ? `${name} P${seat}` : name;
+}
+
 function showBanner(replayName) {
   const fs = S.view.final_scores;
-  const you = fs[S.humanPlayer];
-  const ai = fs[1 - S.humanPlayer];
-  const verdict = you > ai ? "You win" : you < ai ? "AI wins" : "Draw";
-  $("banner-scores").textContent = `${verdict} — you ${you}, AI ${ai}`;
+  const best = Math.max(...fs);
+  const winners = fs.flatMap((pts, seat) => (pts === best ? [seat] : []));
+  let verdict;
+  if (winners.length === fs.length) {
+    verdict = "Draw";
+  } else if (winners.length === 1) {
+    verdict = winners[0] === S.humanPlayer ? "You win" : `${seatName(winners[0])} wins`;
+  } else {
+    verdict = `Tie: ${winners.map(seatName).join(" & ")}`;
+  }
+  // "You win — You 34 · random 28 · greedy 41", winners bolded.
+  const line = $("banner-scores");
+  line.replaceChildren(`${verdict} — `);
+  fs.forEach((pts, seat) => {
+    if (seat > 0) line.append(" · ");
+    const text = `${seatName(seat)} ${pts}`;
+    if (winners.includes(seat)) {
+      const b = document.createElement("strong");
+      b.textContent = text;
+      line.append(b);
+    } else {
+      line.append(text);
+    }
+  });
   $("banner-saved").textContent = replayName ? `Saved as ${replayName}` : "";
   $("banner").classList.add("show");
-  logMeta(`Game over — ${you}:${ai}`);
+  logMeta(`Game over — ${fs.join(":")}`);
 }
 
 // --- rotation / the lens -----------------------------------------------------------
@@ -293,8 +346,10 @@ function render(now) {
 
   // (F1) Persistent last-move markers: a solid ring in the mover's colour plus a
   // labelled corner chip, so "your last move" vs "AI's last move" is unambiguous.
-  drawMoveRing(bctx, board, S.cam, S.lastHumanMove, playerToken(S.humanPlayer), "You");
-  drawMoveRing(bctx, board, S.cam, S.lastAiMove, playerToken(1 - S.humanPlayer), "AI");
+  // With several AI seats only the most recent AI move is ringed, named by seat.
+  drawMoveRing(bctx, board, S.cam, S.lastHumanMove, playerColor(S.humanPlayer), "You");
+  const aiLabel = S.seats.length === 2 ? "AI" : seatName(S.lastAiSeat);
+  drawMoveRing(bctx, board, S.cam, S.lastAiMove, playerColor(S.lastAiSeat), aiLabel);
 
   const placing = S.phase === "placing";
   const legalCells = new Map(); // cells legal at the CURRENT rotation
@@ -373,8 +428,6 @@ function render(now) {
   drawLens();
   requestAnimationFrame(render);
 }
-
-const playerToken = (p) => (p === 0 ? TOKENS.p0 : TOKENS.p1);
 
 // (F4) Recentre the camera on the board's bounding-box centre at zoom 1.
 function resetView() {
@@ -588,10 +641,14 @@ function updateSidebar() {
   updateValueReadout();
   if (!S.view) return;
   const scores = S.view.final_scores ?? S.view.scores; // end bonuses once terminal
-  for (const seat of [0, 1]) {
+  const cards = $("cards");
+  if (cards.children.length !== scores.length) {
+    cards.replaceChildren(...scores.map((_, seat) => scoreCard(seat)));
+    cards.classList.toggle("many", scores.length > 2);
+  }
+  for (let seat = 0; seat < scores.length; seat++) {
     const card = $(`card-${seat}`);
-    card.style.setProperty("--edge", seat === 0 ? "var(--p0)" : "var(--p1)");
-    card.querySelector(".who").textContent = seat === S.humanPlayer ? "You" : "AI";
+    card.querySelector(".who").textContent = seatName(seat);
     card.querySelector(".points").textContent = String(scores[seat]);
     const supply = card.querySelector(".supply");
     supply.replaceChildren();
@@ -602,6 +659,19 @@ function updateSidebar() {
   }
   const played = S.view.tiles.length;
   $("tile-count").textContent = `tiles played ${played} · remaining ${DECK_SIZE - played}`;
+}
+
+function scoreCard(seat) {
+  const card = document.createElement("div");
+  card.className = "score-card";
+  card.id = `card-${seat}`;
+  card.style.setProperty("--edge", playerColor(seat));
+  for (const cls of ["who", "points", "supply"]) {
+    const div = document.createElement("div");
+    div.className = cls;
+    card.append(div);
+  }
+  return card;
 }
 
 function pip(seat, kind, filled) {
@@ -644,14 +714,13 @@ function logMeta(text) {
 // (F2) Each score event is a clickable/keyboard-activatable row. Clicking it
 // highlights the event's feature tiles on the board; clicking it again clears.
 function logScore(e) {
-  const mine = e.player === S.humanPlayer;
-  const who = mine ? "You" : "AI";
   const n = e.tiles.length;
+  const color = playerColor(e.player);
 
   const row = document.createElement("button");
   row.type = "button";
-  row.className = `score-row ${mine ? "p0" : "p1"}`;
-  row.style.setProperty("--tint", mine ? "var(--p0)" : "var(--p1)");
+  row.className = "score-row";
+  row.style.setProperty("--tint", color);
 
   const pts = document.createElement("span");
   pts.className = "pts";
@@ -659,10 +728,9 @@ function logScore(e) {
 
   const lbl = document.createElement("span");
   lbl.className = "lbl";
-  lbl.textContent = `${who} · ${e.kind} · ${n} tile${n === 1 ? "" : "s"}`;
+  lbl.textContent = `${seatName(e.player)} · ${e.kind} · ${n} tile${n === 1 ? "" : "s"}`;
 
   row.append(pts, lbl);
-  const color = mine ? TOKENS.p0 : TOKENS.p1;
   const tiles = e.tiles;
   row.addEventListener("click", () => toggleScoreHighlight(row, tiles, color));
   logEl.append(row);
@@ -690,22 +758,87 @@ function clearScoreHighlight() {
 
 // --- new game dialog ----------------------------------------------------------------------------------
 
-$("new-game").addEventListener("click", () => dialog.showModal());
-$("banner-again").addEventListener("click", () => dialog.showModal());
+const ORDINALS = ["1st", "2nd", "3rd", "4th", "5th"];
+
+function option(value, text) {
+  const opt = document.createElement("option");
+  opt.value = value;
+  opt.textContent = text;
+  return opt;
+}
+
+// One opponent <select> per AI seat (n-1 of them). Checkpoint agents are
+// 2-player only (the server 422s otherwise), so they're offered only when n === 2;
+// a checkpoint picked at 2 players falls back to greedy when the table grows.
+function renderOpponentSelects(n) {
+  const wrap = $("opt-opponents");
+  const prev = [...wrap.querySelectorAll("select")].map((sel) => sel.value);
+  wrap.replaceChildren();
+  for (let i = 0; i < n - 1; i++) {
+    const id = `opt-opponent-${i}`;
+    const row = document.createElement("div");
+    row.className = "row";
+    const label = document.createElement("label");
+    label.htmlFor = id;
+    label.textContent = n === 2 ? "Opponent" : `Opponent ${i + 1}`;
+    const sel = document.createElement("select");
+    sel.id = id;
+    sel.append(option("greedy", "Greedy"), option("random", "Random"));
+    if (n === 2) {
+      for (const ckpt of S.checkpoints) {
+        sel.append(option(`ckpt:${ckpt.id}`, `Checkpoint ${ckpt.step}`));
+      }
+    }
+    const keep = prev[i] ?? prev[0];
+    sel.value = [...sel.options].some((o) => o.value === keep) ? keep : "greedy";
+    row.append(label, sel);
+    wrap.append(row);
+  }
+}
+
+// Seats 0..n-1 labelled by turn order; keeps the current pick while it fits.
+function renderSeatOptions(n) {
+  const sel = $("opt-seat");
+  const prev = Number(sel.value);
+  sel.replaceChildren();
+  for (let s = 0; s < n; s++) {
+    const text = s === 0 ? "You start" : n === 2 ? "AI starts" : `You play ${ORDINALS[s]}`;
+    sel.append(option(String(s), text));
+  }
+  sel.value = String(Number.isInteger(prev) && prev < n ? prev : 0);
+}
+
+function renderDialogOptions() {
+  const n = Number($("opt-players").value);
+  renderOpponentSelects(n);
+  renderSeatOptions(n);
+}
+
+function openDialog() {
+  $("dialog-error").textContent = "";
+  dialog.showModal();
+}
+
+$("opt-players").addEventListener("change", renderDialogOptions);
+$("new-game").addEventListener("click", openDialog);
+$("banner-again").addEventListener("click", openDialog);
 $("dialog-cancel").addEventListener("click", () => dialog.close());
 $("dialog-start").addEventListener("click", async () => {
-  const opponent = $("opt-opponent").value;
+  const opponents = [...$("opt-opponents").querySelectorAll("select")].map((sel) => sel.value);
   const seat = Number($("opt-seat").value);
   const seedRaw = $("opt-seed").value.trim();
   const seed = seedRaw === "" ? null : Number(seedRaw);
   dialog.close();
   try {
-    await newGame(opponent, seat, Number.isFinite(seed) ? seed : null);
+    await newGame(opponents, seat, Number.isFinite(seed) ? seed : null);
   } catch (err) {
-    S.error = `Could not start the game — ${err.message || err}`;
+    // Config errors carry {"error", "explanation"}; prefer the explanation.
+    const why = err.body?.explanation ?? err.message ?? String(err);
+    S.error = `Could not start the game — ${why}`;
     S.phase = "idle";
     updateSidebar();
-    dialog.showModal();
+    openDialog();
+    $("dialog-error").textContent = why;
   }
 });
 
@@ -728,21 +861,18 @@ $("lens").addEventListener("click", rotate);
 // --- boot ---------------------------------------------------------------------------------------------------------
 
 async function populateCheckpoints() {
-  // Offer each saved checkpoint as a `ckpt:<id>` opponent. If none are configured
-  // the dialog keeps just greedy/random.
+  // Offer each saved checkpoint as a `ckpt:<id>` opponent (2-player only). If
+  // none are configured the dialog keeps just greedy/random.
   try {
     const { checkpoints } = await api("/api/checkpoints");
-    const select = $("opt-opponent");
-    for (const ckpt of checkpoints) {
-      const opt = document.createElement("option");
-      opt.value = `ckpt:${ckpt.id}`;
-      opt.textContent = `Checkpoint ${ckpt.step}`;
-      select.appendChild(opt);
-    }
+    S.checkpoints = checkpoints;
   } catch {
     /* checkpoints are optional; ignore a missing/errored endpoint */
   }
+  renderDialogOptions();
 }
+
+renderDialogOptions(); // greedy/random immediately; checkpoints join once fetched
 
 async function boot() {
   const defs = await api("/api/tiledefs");
@@ -754,9 +884,9 @@ async function boot() {
   // stays reachable. A modal dialog on load would sit in the browser top layer
   // and block the nav links until dismissed. "New game" reconfigures any time.
   try {
-    await newGame("greedy", 0, null);
+    await newGame(["greedy"], 0, null);
   } catch {
-    dialog.showModal(); // couldn't auto-start (e.g. server error) — let the user choose
+    openDialog(); // couldn't auto-start (e.g. server error) — let the user choose
   }
 }
 

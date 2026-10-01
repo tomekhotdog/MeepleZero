@@ -16,6 +16,9 @@
   --monastery: #8e4a3e;
   --p0: #4c7dd0;
   --p1: #c05b4d;
+  --p2: #8b6bc9;
+  --p3: #c965a8;
+  --p4: #e0b54b;
   --ai: #5fd4c4;
   --hairline: #343b46;
 
@@ -274,6 +277,18 @@ body {
 }
 
 /* (3) Score cards. */
+#cards {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+/* 3-5 players: tighter cards so the log keeps room in the sidebar. */
+#cards.many {
+  gap: 6px;
+}
+#cards.many .score-card .points {
+  font-size: 22px;
+}
 .score-card {
   position: relative;
   padding: 8px 12px 8px 15px;
@@ -401,6 +416,13 @@ body {
   outline-offset: 2px;
 }
 
+/* Hints are a 2-player feature: the row is hidden (via [hidden]) for 3-5
+   players, and the flex display above would otherwise override it. */
+#hint-row[hidden],
+#value-readout[hidden] {
+  display: none;
+}
+
 #value-readout {
   font-family: var(--mono);
   font-size: 12px;
@@ -503,6 +525,11 @@ dialog input {
 
 dialog input {
   font-family: var(--mono);
+}
+
+/* New-game config errors (server explanation) wrap inside the dialog. */
+#dialog-error {
+  max-width: 280px;
 }
 
 dialog .actions {
@@ -847,6 +874,15 @@ dialog .actions {
 }
 .swatch.p1 {
   background: var(--p1);
+}
+.swatch.p2 {
+  background: var(--p2);
+}
+.swatch.p3 {
+  background: var(--p3);
+}
+.swatch.p4 {
+  background: var(--p4);
 }
 .delta-chip {
   display: inline-block;

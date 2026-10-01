@@ -23,6 +23,9 @@ export const TOKENS = {
   monastery: "#8E4A3E",
   p0: "#4C7DD0",
   p1: "#C05B4D",
+  p2: "#8B6BC9",
+  p3: "#C965A8",
+  p4: "#E0B54B",
   ai: "#5FD4C4",
   ink: "#14181E", // dark outline for meeples / glyph details
 };
@@ -42,7 +45,8 @@ const CORNER = [
   [0, 1],
 ];
 
-const playerColor = (p) => (p === 0 ? TOKENS.p0 : TOKENS.p1);
+/** Seat colour for any seat 0..4; unknown seats fall back to ink. */
+export const playerColor = (p) => [TOKENS.p0, TOKENS.p1, TOKENS.p2, TOKENS.p3, TOKENS.p4][p] ?? TOKENS.ink;
 
 // --- geometry helpers -------------------------------------------------------
 

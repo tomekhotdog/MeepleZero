@@ -36,16 +36,7 @@
 
         <div id="status">&nbsp;</div>
 
-        <div class="score-card" id="card-0">
-          <div class="who"></div>
-          <div class="points">0</div>
-          <div class="supply"></div>
-        </div>
-        <div class="score-card" id="card-1">
-          <div class="who"></div>
-          <div class="points">0</div>
-          <div class="supply"></div>
-        </div>
+        <div id="cards"></div>
 
         <div id="tile-count"></div>
 
@@ -67,19 +58,18 @@
     <dialog id="dialog">
       <h2>New game</h2>
       <div class="row">
-        <label for="opt-opponent">Opponent</label>
-        <select id="opt-opponent">
-          <option value="greedy" selected>Greedy</option>
-          <option value="random">Random</option>
+        <label for="opt-players">Players</label>
+        <select id="opt-players">
+          <option value="2" selected>2</option><option value="3">3</option>
+          <option value="4">4</option><option value="5">5</option>
         </select>
       </div>
+      <div id="opt-opponents"></div>
       <div class="row">
         <label for="opt-seat">Seat</label>
-        <select id="opt-seat">
-          <option value="0" selected>You start</option>
-          <option value="1">AI starts</option>
-        </select>
+        <select id="opt-seat"></select>
       </div>
+      <p id="dialog-error" class="error" role="alert"></p>
       <div class="row">
         <label for="opt-seed">Seed (optional)</label>
         <input id="opt-seed" type="text" inputmode="numeric" placeholder="random" />
