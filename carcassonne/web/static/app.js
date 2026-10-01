@@ -4,7 +4,14 @@
 // board canvas redraws fully every animation frame (boards are tiny). All
 // server contracts are consumed exactly as produced by web/views.py.
 
-import { TOKENS, drawTile, drawMeepleGlyph, featureAnchor, playerColor } from "./tiles.js";
+import {
+  TOKENS,
+  drawTile,
+  drawMeepleGlyph,
+  featureAnchor,
+  playerColor,
+  SEAT_COLOR_NAMES,
+} from "./tiles.js";
 import {
   cellPx as boardCellPx,
   worldToScreen as boardWorldToScreen,
@@ -137,8 +144,6 @@ function clearHint() {
 }
 
 // --- game flow -------------------------------------------------------------------
-
-const SEAT_COLOR_NAMES = ["blue", "red", "purple", "pink", "yellow"];
 
 // `opponents` are the AI seats' agent specs in seat order (the human's seat is
 // skipped), so the table has opponents.length + 1 players.

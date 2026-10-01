@@ -50,6 +50,9 @@ const PLAYER_COLORS = [TOKENS.p0, TOKENS.p1, TOKENS.p2, TOKENS.p3, TOKENS.p4];
 /** Seat colour for any seat 0..4; unknown seats fall back to ink. */
 export const playerColor = (p) => PLAYER_COLORS[p] ?? TOKENS.ink;
 
+/** Human-readable name of each seat colour (index-aligned to PLAYER_COLORS). */
+export const SEAT_COLOR_NAMES = ["blue", "red", "purple", "pink", "yellow"];
+
 // --- geometry helpers -------------------------------------------------------
 
 /** Anchor (unit coords, rotation applied) for feature i of a tile def:

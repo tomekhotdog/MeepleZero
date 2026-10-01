@@ -16,7 +16,14 @@ import {
   screenToCellFloat,
   worldToScreen,
 } from "./board.js";
-import { TOKENS, featureAnchor, drawTile, drawMeepleGlyph, playerColor } from "./tiles.js";
+import {
+  TOKENS,
+  featureAnchor,
+  drawTile,
+  drawMeepleGlyph,
+  playerColor,
+  SEAT_COLOR_NAMES,
+} from "./tiles.js";
 import {
   drawMoveRing,
   drawTileHighlight,
@@ -43,8 +50,8 @@ const R = {
   np: 2, // seat count of the loaded replay (2..5); set once per replay in loadReplay
   index: 0, // current position: 0..moves.length
   moveRows: null, // <button> per move, built once per replay; index-aligned to moves
-  winprob: [], // per-move {p: prob for player 0, known: bool}, length moves.length; [] unless np === 2
-  scores: [], // (③) per-position [p0, .., pN-1] running score, length states.length (M+1)
+  winprob: [], // per-move {p: win prob for seat 0 (P1), known: bool}, length moves.length; [] unless np === 2
+  scores: [], // (③) per-position running score, one entry per seat (0-indexed), length states.length (M+1)
   scoreMax: 1, // (③) y-axis top for the score chart (max score reached, min 1)
   cam: { x: 0, y: 0, zoom: 1 },
   drag: null,
@@ -88,6 +95,23 @@ const seatLabel = (p) => `P${p + 1}`;
 // Seat indices 0..R.np-1, for every per-seat loop.
 const seats = () => Array.from({ length: R.np }, (_, p) => p);
 
+// Agent name for seat p, or "" if the header doesn't list one.
+const agentName = (p) => R.data?.header?.agents?.[p] ?? "";
+
+// The loaded replay's seat count, or an Error explaining why it's unusable.
+// Authoritative source: states[0].scores.length — the array seats() indexes.
+// header.config.num_players, when present, must agree (coerced via Number()).
+function replaySeatCount(data) {
+  const n = data?.states?.[0]?.scores?.length;
+  if (!Number.isInteger(n)) return new Error("unsupported replay: no seat scores in states");
+  if (n < 2 || n > 5) return new Error(`unsupported replay: ${n} seats (expected 2–5)`);
+  const declared = data.header?.config?.num_players;
+  if (declared !== undefined && declared !== null && Number(declared) !== n) {
+    return new Error(`unsupported replay: header says ${declared} players but states have ${n} seats`);
+  }
+  return n;
+}
+
 // --- server calls ------------------------------------------------------------
 
 async function api(path) {
@@ -107,15 +131,19 @@ function describeReplay(m) {
   const agents = (m.agents ?? []).join(" vs ");
   const fs = m.final_scores ? m.final_scores.join("–") : "?";
   const ws = m.winners ?? [];
-  const np = m.final_scores?.length ?? 2;
+  // Without final_scores the seat count is unknown, so "draw" can't be told
+  // apart from a tie — omit the result rather than guess.
+  const np = m.final_scores?.length;
   const win =
-    ws.length === np
-      ? "draw"
-      : ws.length === 1
-        ? `${seatLabel(ws[0])} won`
-        : `tie: ${ws.map(seatLabel).join(" & ")}`;
+    np === undefined || ws.length === 0
+      ? null
+      : ws.length === np
+        ? "draw"
+        : ws.length === 1
+          ? `${seatLabel(ws[0])} won`
+          : `tie: ${ws.map(seatLabel).join(" & ")}`;
   const when = (m.started_at ?? "").replace("T", " ").slice(0, 16);
-  return `${agents} · ${when} · ${fs} · ${win}`;
+  return [agents, when, fs, win].filter((x) => x !== null).join(" · ");
 }
 
 async function loadReplayList() {
@@ -141,8 +169,9 @@ async function loadReplayList() {
 async function loadReplay(name) {
   stopAutoplay();
   showError("");
+  let data;
   try {
-    R.data = await api(`/api/replays/${encodeURIComponent(name)}`);
+    data = await api(`/api/replays/${encodeURIComponent(name)}`);
   } catch (err) {
     R.data = null;
     const msg = err.body?.explanation || err.body?.error || err.message || String(err);
@@ -150,11 +179,21 @@ async function loadReplay(name) {
     hidePanels();
     return;
   }
+  // Validate before touching R, so a bad replay leaves the error UI, not a
+  // half-built view of the previous one.
+  const np = replaySeatCount(data);
+  if (np instanceof Error) {
+    R.data = null;
+    showError(`Could not load replay — ${np.message}`);
+    hidePanels();
+    return;
+  }
+  R.data = data;
+  R.np = np;
   R.cam = { x: 0, y: 0, zoom: 1 };
-  R.np = R.data.header.config.num_players ?? R.data.final_scores.length;
   // Win probability (and the lead-change markers derived from it) is a 2-player
-  // AI-belief feature: annot.value is zero-sum, so "P0 win%" only means
-  // something head-to-head. 3-5 player replays carry no annots anyway.
+  // AI-belief feature: annot.value is zero-sum, so a seat-0 ("P1") win% only
+  // means something head-to-head. 3-5 player replays carry no annots anyway.
   if (R.np === 2) buildWinProb();
   else R.winprob = [];
   buildScore();
@@ -179,7 +218,7 @@ async function loadReplay(name) {
       : `move 0 → ${M} · points · one line per seat, in its colour`;
   $("deck-panel").hidden = false;
   $("supply-panel").hidden = false;
-  document.querySelector(".p0-name").textContent = `${seatLabel(0)} ${R.data.header.agents[0]}`;
+  document.querySelector(".p0-name").textContent = `${seatLabel(0)} ${agentName(0)}`;
   setIndex(0);
 }
 
@@ -312,9 +351,17 @@ function updateMoveHighlight() {
 
 // --- move info ---------------------------------------------------------------
 
+// Seat colour swatch; carries the colour name (title + aria-label) like the
+// Play view's score cards, so colour isn't the only cue.
 function swatch(player) {
   const s = document.createElement("span");
   s.className = `swatch p${player}`;
+  const name = SEAT_COLOR_NAMES[player];
+  if (name) {
+    s.title = name;
+    s.setAttribute("role", "img");
+    s.setAttribute("aria-label", name);
+  }
   return s;
 }
 
@@ -341,7 +388,7 @@ function renderMoveInfo() {
   const who = $("move-who");
   who.replaceChildren(
     swatch(rec.player),
-    document.createTextNode(` ${seatLabel(rec.player)} · ${R.data.header.agents[rec.player]}`)
+    document.createTextNode(` ${seatLabel(rec.player)} · ${agentName(rec.player)}`)
   );
   $("move-detail").textContent = `${rec.tile} → ${moveLabel(rec.move)}`;
 
@@ -372,10 +419,11 @@ function sameMove(a, b) {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
-// P0-perspective win% (seat 0, labelled "P1") for a move's annot, or null if it
-// has no search data. annot.value is the MOVING player's value in [-1, 1] (tanh); flip it to P0's
-// perspective and map to [0, 100] — the exact transform buildWinProb uses for
-// the win-probability chart, so this number always agrees with that chart.
+// Seat-0 (labelled "P1") win% for a move's annot, or null if it has no search
+// data; 2-player replays only. annot.value is the MOVING player's value in
+// [-1, 1] (tanh); flip it to seat 0's perspective and map to [0, 100] — the
+// exact transform buildWinProb uses for the win-probability chart, so this
+// number always agrees with that chart.
 function winPctOf(rec) {
   if (!rec || !rec.annot) return null;
   const p0Value = rec.player === 0 ? rec.annot.value : -rec.annot.value;
@@ -412,7 +460,7 @@ function renderSearchPanel() {
   const totalPrior = annot.top.reduce((s, c) => s + c.prior, 0) || 1;
   const heuristic = totalVisits === 0;
 
-  // Value as a P0-perspective win%, with a delta vs the previous ANNOTATED move.
+  // Value as a seat-0 (P1) win%, with a delta vs the previous ANNOTATED move.
   // Human moves have no annot, so we search back past them for the last search.
   const winPct = winPctOf(rec);
   let prevPct = null;
@@ -742,7 +790,8 @@ function winProbClick(e) {
 // --- (③) running score + score-over-time chart -------------------------------
 
 // The actual game score after each position, distinct from the win-prob chart
-// (which is the AI's belief). states[i].scores is [p0, p1] AFTER move i-1, so
+// (which is the AI's belief). states[i].scores is one entry per seat (0-indexed;
+// shown as P1..PN) AFTER move i-1, so
 // this series is index-aligned to R.index directly — no -1 offset. The terminal
 // state's running .scores is pre-end-game; its .final_scores adds the end-game
 // scoring of incomplete features, so use that for the last point (and readout)
@@ -767,7 +816,7 @@ function renderScoreReadout() {
   const chips = seats().map((p) => {
     const chip = document.createElement("span");
     chip.className = `score-chip p${p}`;
-    chip.title = R.data.header.agents[p];
+    chip.title = agentName(p);
     chip.append(swatch(p), document.createTextNode(`${seatLabel(p)} ${s ? s[p] : 0}`));
     return chip;
   });
@@ -881,10 +930,10 @@ function buildKeyMoments() {
     return e;
   };
 
-  // Lead changes: walk the known win-prob points; a moment is where the P0
-  // advantage flips side of 0.5 vs the previous known point. winprob[i] is
+  // Lead changes: walk the known win-prob points; a moment is where seat 0's
+  // (P1's) advantage flips side of 0.5 vs the previous known point. winprob[i] is
   // move i (0-based) → position i+1.
-  let prevSide = null; // true = P0 ahead (p ≥ 0.5)
+  let prevSide = null; // true = seat 0 (P1) ahead (p ≥ 0.5)
   for (let i = 0; i < R.winprob.length; i++) {
     if (!R.winprob[i].known) continue;
     const side = R.winprob[i].p >= 0.5;
@@ -1032,7 +1081,7 @@ function renderSupply() {
     row.className = "supply-row";
     const who = document.createElement("div");
     who.className = "supply-who";
-    who.append(swatch(p), document.createTextNode(`${seatLabel(p)} ${R.data.header.agents[p]}`));
+    who.append(swatch(p), document.createTextNode(`${seatLabel(p)} ${agentName(p)}`));
     const supply = document.createElement("div");
     supply.className = "supply";
     for (let i = 0; i < 7; i++) supply.append(pip(p, "meeple", i < view.meeples[p]));
