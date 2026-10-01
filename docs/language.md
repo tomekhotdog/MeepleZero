@@ -59,17 +59,20 @@ defined term; in docs, bold on first use per section.
   every legal placement; its size H×W varies per state (replaces the fixed
   31×31 window).
 - **Key** — a Move in world coordinates, `(x, y, rotation, sub-action)`: the
-  stable vocabulary the ReplayBuffer stores policy targets in; per-state flat
-  indices are an encode-time detail derived from it.
+  stable vocabulary the ReplayBuffer stores policy targets in. The policy head
+  sees a per-state *flat index* over the Crop instead,
+  `((gy*W + gx)*4 + rot)*14 + a` (grid cell, rotation, sub-action). It is
+  derived from the Key at encode time and is never stored (`nn/actions.py`:
+  `flat_index`, `move_indices`, `legal_mask`).
 - **Encoder** — maps a GameState to `(planes, H, W)` tensor planes over the
   Crop; includes FeaturePlanes and the current tile as structural property
   planes.
 - **FeaturePlanes** — input planes derived from the engine's feature graph
   (per-tile city/road size, open-edge count, meeple ownership); hands the
   net long-range connectivity instead of making convs infer it.
-- **ActionIndexer** — the deterministic bijection between Moves and policy
-  indices, with legal-move masking. Moves are keyed by world coordinates
-  `(pos, rotation, sub-action)`; Crop grid indices are an encode-time detail.
+- *ActionIndexer* — **retired** (iteration ≤2): the fixed bijection between
+  Moves and the 31×31 window's policy indices. It was replaced by the **Key**
+  plus the per-state flat index over the Crop (see **Key**).
 - **Checkpoint** — a saved network (weights + config + training step id);
   playable from the web app. Pre-iteration-3 (31×31) checkpoints do not load.
 
@@ -78,7 +81,11 @@ defined term; in docs, bold on first use per section.
 - **TrainingRun** — a directory holding everything about one training session
   (config, checkpoints, replays, buffer, metrics); resumable unit of work.
 - **SelfPlay** — MctsAgent vs itself generating Replays + policy targets;
-  runs as a multiprocess worker pool (one full game per worker).
+  runs in a SelfplayPool when `--workers` > 1, and in-process otherwise.
+- **SelfplayPool** — the spawn-based pool of worker processes that play whole
+  self-play games, each worker with its own copy of the best net. The parent
+  process is the only one that writes to the ReplayBuffer. The pool is
+  recreated when a new net is promoted (`training/pool.py`).
 - **ReplayBuffer** — the on-disk window of recent positions the learner samples.
 - **Arena** — head-to-head evaluation: candidate vs current-best (gating,
   promote on >55%) and vs GreedyAgent (absolute yardstick).

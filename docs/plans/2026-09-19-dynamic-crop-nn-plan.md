@@ -1677,10 +1677,85 @@ git add -A && git commit -m "feat(training)!: iteration-3 defaults (48ch x 4 blo
 
 ## Results (recorded at Task 10)
 
-- `bench --games 2 --sims 16 --channels 48 --n-blocks 4` → *(paste output here)*
-- Speedup vs baseline: *(compute; bar: ≥5×)*
-- `param_count` at defaults: *(paste; bar: ≤250k)*
-- Worker scaling 1→4: *(paste timings)*
+Recorded 2026-10-01 on the same Intel Mac (4 physical / 8 logical cores, 16 GB,
+torch 2.2 CPU). Every run was wrapped in `caffeinate -dims` with no other load.
+The bench is single-process, with torch's default intra-op threads, as in the
+baseline.
+
+- `bench --games 2 --sims 16 --channels 48 --n-blocks 4 --seed 0`, run 3 times:
+  ```
+  params=192673
+  games=2 sims=16 channels=48 n_blocks=4 total=21.0s s/game=10.5 games/hour=343.4
+  games=2 sims=16 channels=48 n_blocks=4 total=23.1s s/game=11.6 games/hour=311.6
+  games=2 sims=16 channels=48 n_blocks=4 total=18.0s s/game=9.0 games/hour=400.2
+  ```
+  **Median 343.4 games/hour.**
+- **Speedup vs baseline: 343.4 / 143.4 = 2.39× — FAIL against the ≥5× bar
+  (≥717 games/hour).** The single-process target was not met. The run-to-run
+  spread is about ±13%, which is nowhere near enough to close the gap.
+- Attribution: `--channels 64 --n-blocks 5` re-run on the current code, 3 times:
+  ```
+  params=404481
+  games=2 sims=16 channels=64 n_blocks=5 total=30.2s s/game=15.1 games/hour=238.5
+  games=2 sims=16 channels=64 n_blocks=5 total=22.5s s/game=11.3 games/hour=319.5
+  games=2 sims=16 channels=64 n_blocks=5 total=31.7s s/game=15.8 games/hour=227.4
+  ```
+  Median 238.5. (a) Representation, MCTS, and tree-reuse changes at 64×5:
+  238.5 / 143.4 = **1.66×**. This 64×5 net is not the baseline's net: the
+  heads are now fully convolutional, which cuts it from 655,865 to 404,481
+  params, so (a) includes the head change. (b) Net-size change, 48×4 vs 64×5
+  on the current code: 343.4 / 238.5 = **1.44×**. Together:
+  1.66 × 1.44 ≈ 2.39×.
+- `param_count` at defaults: **192,673** (bar ≤250k: PASS). This is pinned by
+  `tests/cli/test_train_defaults.py` and `tests/nn/test_model.py::test_param_budget`.
+- Worker scaling 1→4. The command was `train --run <fresh dir> --sims 8
+  --selfplay-games 8 --learn-steps 1 --iterations 1 --device cpu` at 48×4. The
+  self-play phase was timed on its own, from the end of `_establish_nets` to
+  the first `evict_to`, so the 4-worker figure includes spawning the pool.
+  | workers | self-play | total wall-clock |
+  |---|---|---|
+  | 1 | 69.2s | 104.5s |
+  | 4 | 22.9s | 44.4s |
+
+  Self-play speeds up **3.02×** with 4 workers on 4 physical cores, which is
+  close to linear. Combined with the 2.39× single-process speedup, 4-worker
+  self-play produces about 2.39 × 3.02 ≈ **7.2×** the baseline's games/hour on
+  this Mac. That is aggregate throughput, not the single-process bar above.
+- Deferred measurement: learner rotation cost (M12). Measured on the buffer
+  from the 1-worker scaling run (568 examples / 8 games) at batch 256, 48×4,
+  CPU, as the mean of 5 steps after a warm-up:
+  ```
+  augment=False: build_batch=1681ms/step  train_step=4999ms/step
+  augment=True:  build_batch=2616ms/step (rotate_state_90 513ms = 20% of build_batch)
+                 train_step=20343ms/step (rotation 547ms = 3%)
+  ```
+  Rotating the state itself is cheap: about 0.5s/step, 3% of a step, even
+  though `rotate_state_90` rebuilds FeatureIndex for each 90° turn. **The real
+  cost of augmentation is padding.** A rotated crop swaps h and w, so a mixed
+  batch pads to max(h) × max(w) over both orientations:
+  ```
+  augment=False: padded cells/example=750  mean real cells=203  pad-efficiency=27%  (e.g. 14x54)
+  augment=True:  padded cells/example=2798 mean real cells=205  pad-efficiency=7%   (e.g. 53x52)
+  ```
+  That is 3.7× more padded cells, which matches the roughly 4× slower
+  `train_step`. Even without augmentation only 27% of cells are real. Not
+  optimised here: recorded as a follow-up. Possible fixes are choosing the
+  rotation so every crop is landscape, or bucketing batches by shape.
+- Deferred measurement: subtree-reuse equality cost (M13). Two `MctsAgent`s
+  (reuse on, `self_play=False`) alternated in an arena-style game at sims=16,
+  48×4, with `_take_stash` and `choose` wrapped in `perf_counter`:
+  ```
+  seed=0: game=14.5s choose=14.3s take_stash=3ms = 0.02% of choose
+  seed=1: game=14.3s choose=14.1s take_stash=2ms = 0.02% of choose
+  ```
+  This is negligible, so no action.
+- End-to-end smoke test (`--workers 2 --sims 4 --selfplay-games 6
+  --learn-steps 2`). A fresh 3-iteration run got SIGINT after 2 games of
+  iteration 1. It finished that iteration and exited 0 (`games_generated=6`,
+  checkpoint `step_000002`). `--resume --iterations 2` then continued to
+  `games_generated=18` and checkpoint `step_000006`. The buffer holds 18 rows
+  with 18 distinct `game_id`s and there are 18 replay files. `pgrep -fl
+  spawn_main` showed no orphan workers after the stop or after the resume.
 
 ## Deferred (explicitly)
 

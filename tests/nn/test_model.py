@@ -59,7 +59,7 @@ def test_policy_flatten_matches_action_indexer_exactly() -> None:
     Fill the conv output with unique values so every (channel, gy, gx) slot is
     distinguishable, then check that the value at every flat index is exactly
     the one from cell (gy, gx), channel rot*14+a — where the flat index comes
-    from the ActionIndexer's own `flat_index`, not a re-derived formula. Any
+    from nn/actions.py's own `flat_index`, not a re-derived formula. Any
     permutation error (swapped rot/a split, transposed gy/gx) fails loudly.
     """
     h, w = 3, 5  # non-square so transposed axes cannot alias

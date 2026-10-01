@@ -37,19 +37,64 @@ mutually compatible.
 uv run carcassonne train --run runs/pi-001 \
   --channels 48 --n-blocks 4 --sims 100 \
   --selfplay-games 20 --learn-steps 40 \
-  --gate-every 5 --gate-games 20 --seed 0
+  --gate-every 5 --gate-games 20 --workers 4 --seed 0
 ```
 
-(48 channels × 4 blocks is the network's own default — ~193k params, sized for
-Pi inference; pass the flags explicitly so the run's config is self-describing.)
+(48 channels × 4 blocks is the default — ~193k params, sized for Pi inference;
+pass the flags explicitly so the run's config is self-describing. `--workers 4`
+is one self-play process per Pi 5 core; `--workers 0`, the default, means "one
+per CPU core" too. On `--resume`, the worker count comes from the current
+command, not from the run's `config.json`, so you can change it between
+restarts.)
 
-Tune for the Pi's throughput: CPU self-play dominates wall-clock — each MCTS
-move is `sims` sequential network evaluations, and one evaluation's cost scales
-with the actual board area (the encoder crops to the placed tiles' bounding
-box + 1, so early-game evaluations run on tiny grids: roughly 2 ms at the
-start of a game up to ~10 ms on a full end-game board, per CPU core). Start
-smaller (`--sims 50`, `--selfplay-games 8`) and scale up once you see the loss
-falling and the `wr_greedy` yardstick climbing on the dashboard.
+**Start from a fresh run directory.** Checkpoints are stamped with a format
+marker, and anything written before iteration 3 (the dynamic-crop net) is
+rejected with a clear `ValueError` ("…is from a pre-iteration-3 run… start a
+new run directory"). There is no migration. The old `runs/mac-demo` smoke run
+is retired: it stays on disk, but it can't be resumed or loaded as `ckpt:`.
+
+**Training is 2-player.** The engine, `simulate`, and the web Play and Replay
+views support 2 to 5 players, but the RL stack does not. The encoder,
+`MctsAgent`, and self-play all raise on any other player count, and a
+checkpoint agent can't be seated in a 3 to 5 player web game. Train and gate on
+2-player games only; use the larger player counts for play and analysis against
+`greedy`/`random`.
+
+Throughput levers, roughly in order of how much they matter:
+
+- **Compute follows the board (automatic).** The encoder crops to the placed
+  tiles' bounding box plus a 1-cell margin, and the fully-convolutional net
+  runs on exactly that crop. Early-game evaluations run on tiny grids and cost
+  grows with the board, so a whole game costs far less than a fixed full-board
+  window would.
+- **Workers (`--workers`).** Self-play games run in a pool of spawned worker
+  processes, each playing whole games with its own copy of the best net. Self-play
+  scales with physical cores, so use 4 on a Pi 5. The learner and arena gating
+  still run in the main process.
+- **Tree reuse (automatic).** After each move, MCTS keeps the searched subtree
+  below the move it played. The next search starts from that subtree, or from
+  the matching node one ply deeper when an opponent moved in between, so it
+  keeps the visits it already made.
+- **`--sims` / `--selfplay-games`.** Every MCTS move is `sims` sequential
+  network evaluations. Start smaller (`--sims 50`, `--selfplay-games 8`) and
+  scale up once the loss is falling and the `wr_greedy` yardstick is climbing on
+  the dashboard.
+
+### Pi-only checks (can't be measured on the Mac)
+
+The self-play pool **stays resident** between self-play phases: its workers sit
+idle while the learner trains and the arena gates. They are recreated only when
+a new net is promoted. Peak memory is therefore 4 workers × (torch + net + MCTS
+trees) plus the main process's learner, best net, and replay batch, all at the
+same time. During the first few iterations, measure resident memory while the
+run is in its learn or gate phase:
+
+```bash
+free -m                                              # whole-box view
+ps -o pid,rss,command -C python3 | sort -k2 -n       # per-process RSS (KiB)
+```
+
+If the 4-worker total pushes the Pi into swap, drop to `--workers 3`.
 
 ## Run it for days, unattended (systemd)
 
@@ -73,7 +118,7 @@ User=pi
 WorkingDirectory=/home/pi/Carcasonne
 ExecStart=/home/pi/.local/bin/uv run carcassonne train --run runs/pi-001 --resume \
   --channels 48 --n-blocks 4 --sims 100 --selfplay-games 20 --learn-steps 40 \
-  --gate-every 5 --gate-games 20
+  --gate-every 5 --gate-games 20 --workers 4
 Restart=always
 RestartSec=10
 KillSignal=SIGTERM
@@ -88,9 +133,12 @@ sudo systemctl enable --now carcassonne-train
 journalctl -u carcassonne-train -f          # watch progress
 ```
 
-`--resume` is safe on both first boot (creates the run) and every restart
-(continues it). `Restart=always` + the clean-stop handler means the run
-self-heals across reboots.
+Before enabling the unit, create the run once with the "Start a run" command
+above. You can Ctrl-C it straight away, because `config.json` is written before
+the first iteration starts. The unit can't create the run itself: `--resume`
+refuses a directory with no `config.json`. Once the run exists, every restart
+continues it, and `Restart=always` plus the clean-stop handler let the run
+recover by itself after reboots.
 
 ## Watch it from your Mac's browser
 

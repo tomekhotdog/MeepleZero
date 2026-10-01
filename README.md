@@ -90,7 +90,7 @@ docs/         spec, ubiquitous language, plans, Pi setup
 
 ## Status
 
-Working today: the 2–5 player engine, agents, replays, and CLI; the dynamic-crop NN stack and training loop (2-player, arena-gated, resumable); browser play/replay/training views for 2-player games. In progress (see `docs/plans/2026-09-20-mega-plan.md`): MCTS subtree reuse, multiprocess self-play, 2–5 player browser views. Not built: multiplayer RL (max^n search), the first multi-day Pi training campaign.
+Working today: the 2–5 player engine, agents, replays, and CLI; the dynamic-crop NN stack (~193k params) and training loop (2-player, arena-gated, resumable), with MCTS subtree reuse and multiprocess self-play (`--workers`); browser play and replay views for 2–5 player games, and the training view. Not built: multiplayer RL (max^n search), the first multi-day Pi training campaign.
 
 ---
 
