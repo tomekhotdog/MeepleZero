@@ -446,3 +446,31 @@ def test_legacy_two_player_body_still_works(client: TestClient) -> None:
     r = client.post("/api/games", json={"opponent": "random", "human_player": 0, "seed": 3})
     assert r.status_code == 200
     assert r.json()["seats"] == ["human", "random"]
+
+
+def test_opening_ai_moves_report_their_score_events(client: TestClient) -> None:
+    # Why: when AI seats move before the human, their scoring must reach the
+    # client's score log -- otherwise points appear on the cards with no event
+    # explaining them. Seed 21 (greedy x4, human last) has two different AI
+    # seats each completing a 2-tile city during the opening.
+    body = _create(client, opponents=["greedy"] * 4, num_players=5, human_player=4, seed=21)
+    events = body["events"]
+    assert events, "seed 21 no longer scores in the opening; pick another seed"
+    scores = body["state"]["scores"]
+    # Mid-game scores move only via score events, so the events must account
+    # for every opening point, per seat.
+    for seat, total in enumerate(scores):
+        assert sum(e["points"] for e in events if e["player"] == seat) == total
+    # Play order: events come seat by seat, in the same order the AI moves ran.
+    order = [m["seat"] for m in body["ai_moves"]]
+    assert [order.index(e["player"]) for e in events] == sorted(
+        order.index(e["player"]) for e in events
+    )
+    assert len({e["player"] for e in events}) >= 2
+    for e in events:
+        assert set(e) == {"player", "points", "kind", "tiles"}
+
+
+def test_opening_events_empty_when_human_moves_first(client: TestClient) -> None:
+    body = _create(client, opponents=["greedy"] * 4, num_players=5, human_player=0, seed=21)
+    assert body["ai_moves"] == [] and body["events"] == []

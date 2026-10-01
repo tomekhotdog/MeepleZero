@@ -129,6 +129,13 @@ async function refreshHint() {
   }
 }
 
+// Drop the current hint AND invalidate any in-flight /hint request, so a
+// response for an earlier position (or an earlier game) can never paint.
+function clearHint() {
+  S.hint = null;
+  S.hintEpoch++;
+}
+
 // --- game flow -------------------------------------------------------------------
 
 const SEAT_COLOR_NAMES = ["blue", "red", "purple", "pink", "yellow"];
@@ -145,7 +152,7 @@ async function newGame(opponents, seat, seed) {
   S.seats = data.seats;
   S.humanPlayer = seat;
   S.pending = null;
-  S.hint = null;
+  clearHint();
   S.aiPulse = null;
   S.lastHumanMove = null;
   S.lastAiMove = null;
@@ -160,8 +167,9 @@ async function newGame(opponents, seat, seed) {
   $("hint-row").hidden = hideHints;
   $("value-readout").hidden = hideHints;
   logMeta(`New game vs ${opponents.join(", ")} — you are ${SEAT_COLOR_NAMES[seat]}`);
-  // AI seats before the human's open the game. (The create response carries no
-  // score events for these moves, so nothing is logged for them.)
+  // AI seats before the human's open the game; `events` are their score events
+  // in play order.
+  for (const e of data.events) logScore(e);
   applyAiMoves(data.ai_moves);
   $("banner").classList.remove("show");
   await refreshLegal();
@@ -175,7 +183,7 @@ async function postMove(idx) {
   const chosen = S.legal.find((m) => m.idx === idx);
   if (chosen) S.lastHumanMove = { x: chosen.x, y: chosen.y }; // F1: mark the human placement
   S.phase = "awaiting";
-  S.hint = null;
+  clearHint();
   updateSidebar();
   const gameId = S.gameId; // guard: a "New game" during this await must not stomp the new state
   let data;
@@ -232,11 +240,12 @@ function applyAiMoves(aiMoves) {
 }
 
 // Display name for a seat: "You" for the human, else the agent name. Repeated
-// agent names (two greedy seats) get a P<seat> suffix so they stay distinct.
+// agent names (two greedy seats) get a P<n> suffix so they stay distinct. Seat
+// numbers shown to the user are 1-indexed, matching the dialog's 1st..5th.
 function seatName(seat) {
   if (seat === S.humanPlayer) return "You";
-  const name = S.seats[seat] ?? `P${seat}`;
-  return S.seats.filter((n) => n === name).length > 1 ? `${name} P${seat}` : name;
+  const name = S.seats[seat] ?? `P${seat + 1}`;
+  return S.seats.filter((n) => n === name).length > 1 ? `${name} P${seat + 1}` : name;
 }
 
 function showBanner(replayName) {
@@ -348,8 +357,10 @@ function render(now) {
   // labelled corner chip, so "your last move" vs "AI's last move" is unambiguous.
   // With several AI seats only the most recent AI move is ringed, named by seat.
   drawMoveRing(bctx, board, S.cam, S.lastHumanMove, playerColor(S.humanPlayer), "You");
-  const aiLabel = S.seats.length === 2 ? "AI" : seatName(S.lastAiSeat);
-  drawMoveRing(bctx, board, S.cam, S.lastAiMove, playerColor(S.lastAiSeat), aiLabel);
+  if (S.lastAiMove) {
+    const aiLabel = S.seats.length === 2 ? "AI" : seatName(S.lastAiSeat);
+    drawMoveRing(bctx, board, S.cam, S.lastAiMove, playerColor(S.lastAiSeat), aiLabel);
+  }
 
   const placing = S.phase === "placing";
   const legalCells = new Map(); // cells legal at the CURRENT rotation
@@ -360,7 +371,7 @@ function render(now) {
   }
 
   // Hint overlay: --ai glow, opacity proportional to policy prob (current rotation).
-  if (placing && S.hintOn && S.hint) {
+  if (placing && S.hintOn && S.hint && hintsAvailable()) {
     const entries = S.hint.policy.filter((p) => p.rot === S.rotation);
     const maxProb = Math.max(...entries.map((p) => p.prob), 1e-9);
     for (const p of entries) {
@@ -648,7 +659,7 @@ function updateSidebar() {
   }
   for (let seat = 0; seat < scores.length; seat++) {
     const card = $(`card-${seat}`);
-    card.querySelector(".who").textContent = seatName(seat);
+    card.querySelector(".who .name").textContent = seatName(seat);
     card.querySelector(".points").textContent = String(scores[seat]);
     const supply = card.querySelector(".supply");
     supply.replaceChildren();
@@ -671,6 +682,16 @@ function scoreCard(seat) {
     div.className = cls;
     card.append(div);
   }
+  // Colour swatch beside the name, so seat colour is tied to the name in the
+  // text line and not only to the card's edge (colour-blind players).
+  const swatch = document.createElement("span");
+  swatch.className = `swatch p${seat}`;
+  swatch.title = SEAT_COLOR_NAMES[seat];
+  swatch.setAttribute("role", "img");
+  swatch.setAttribute("aria-label", SEAT_COLOR_NAMES[seat]);
+  const name = document.createElement("span");
+  name.className = "name";
+  card.querySelector(".who").append(swatch, name);
   return card;
 }
 
@@ -849,7 +870,7 @@ $("hint-toggle").addEventListener("change", (e) => {
   if (S.hintOn) {
     refreshHint();
   } else {
-    S.hint = null;
+    clearHint();
   }
   updateValueReadout();
 });

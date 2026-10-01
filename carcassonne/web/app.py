@@ -100,12 +100,17 @@ def create_app(
             )
         seed = body.seed if body.seed is not None else random.randrange(2**31)
         session = store.create(specs, body.human_player, seed)
-        # AI seats before the human's open the game
-        ai_moves = [views.ai_move_view(seat, m, a) for seat, m, a, _ in session.run_ai_turns()]
+        # AI seats before the human's open the game; their score events, in play order
+        ai_moves: list[dict[str, Any]] = []
+        events: list[dict[str, Any]] = []
+        for seat, move, annot, ai_events in session.run_ai_turns():
+            ai_moves.append(views.ai_move_view(seat, move, annot))
+            events.extend(views.score_event_view(e) for e in ai_events)
         return {
             "game_id": session.id,
             "seats": list(session.seat_names),
             "ai_moves": ai_moves,
+            "events": events,
             "state": views.state_view(session.state),
         }
 

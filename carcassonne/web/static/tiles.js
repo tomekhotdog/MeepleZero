@@ -45,8 +45,10 @@ const CORNER = [
   [0, 1],
 ];
 
+const PLAYER_COLORS = [TOKENS.p0, TOKENS.p1, TOKENS.p2, TOKENS.p3, TOKENS.p4];
+
 /** Seat colour for any seat 0..4; unknown seats fall back to ink. */
-export const playerColor = (p) => [TOKENS.p0, TOKENS.p1, TOKENS.p2, TOKENS.p3, TOKENS.p4][p] ?? TOKENS.ink;
+export const playerColor = (p) => PLAYER_COLORS[p] ?? TOKENS.ink;
 
 // --- geometry helpers -------------------------------------------------------
 
