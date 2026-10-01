@@ -14,6 +14,7 @@ from carcassonne.agents import make_agent
 from carcassonne.core import GameConfig
 from carcassonne.game.arena import run_match
 from carcassonne.game.match import play_game
+from carcassonne.nn.model import DEFAULT_CHANNELS, DEFAULT_N_BLOCKS
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -60,8 +61,18 @@ def _build_parser() -> argparse.ArgumentParser:
     tr.add_argument("--resume", action="store_true", help="continue an existing run")
     tr.add_argument("--iterations", type=int, default=None, help="max iterations this invocation")
     tr.add_argument("--sims", type=int, default=100, help="MCTS sims for self-play + gating")
-    tr.add_argument("--channels", type=int, default=64, help="network channels")
-    tr.add_argument("--n-blocks", type=int, default=5, help="residual blocks")
+    tr.add_argument(
+        "--channels",
+        type=int,
+        default=DEFAULT_CHANNELS,
+        help=f"network channels (default {DEFAULT_CHANNELS})",
+    )
+    tr.add_argument(
+        "--n-blocks",
+        type=int,
+        default=DEFAULT_N_BLOCKS,
+        help=f"residual blocks (default {DEFAULT_N_BLOCKS})",
+    )
     tr.add_argument("--selfplay-games", type=int, default=20, help="self-play games per iteration")
     tr.add_argument("--learn-steps", type=int, default=40, help="gradient steps per iteration")
     tr.add_argument("--gate-every", type=int, default=5, help="iterations between arena gates")
@@ -82,8 +93,18 @@ def _build_parser() -> argparse.ArgumentParser:
     be = sub.add_parser("bench", help="time self-play games (throughput yardstick)")
     be.add_argument("--games", type=int, default=4, help="games to play (default 4)")
     be.add_argument("--sims", type=int, default=32, help="MCTS sims per move (default 32)")
-    be.add_argument("--channels", type=int, default=48, help="network channels")
-    be.add_argument("--n-blocks", type=int, default=4, help="residual blocks")
+    be.add_argument(
+        "--channels",
+        type=int,
+        default=DEFAULT_CHANNELS,
+        help=f"network channels (default {DEFAULT_CHANNELS})",
+    )
+    be.add_argument(
+        "--n-blocks",
+        type=int,
+        default=DEFAULT_N_BLOCKS,
+        help=f"residual blocks (default {DEFAULT_N_BLOCKS})",
+    )
     be.add_argument("--seed", type=int, default=0, help="seed of game 0; game i uses seed+i")
 
     srv = sub.add_parser("serve", help="run the web app (play + replay API)")

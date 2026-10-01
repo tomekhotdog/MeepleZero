@@ -34,8 +34,8 @@ from carcassonne.nn.encode import NUM_PLANES, encode_state
 
 _VALUE_CHANNELS = 8
 _VALUE_HIDDEN = 32
-_DEFAULT_CHANNELS = 48
-_DEFAULT_N_BLOCKS = 4
+DEFAULT_CHANNELS = 48
+DEFAULT_N_BLOCKS = 4
 
 
 def _conv3x3(in_ch: int, out_ch: int) -> nn.Conv2d:
@@ -123,8 +123,8 @@ class CarcassonneNet(nn.Module):
     def __init__(
         self,
         num_planes: int = NUM_PLANES,
-        channels: int = _DEFAULT_CHANNELS,
-        n_blocks: int = _DEFAULT_N_BLOCKS,
+        channels: int = DEFAULT_CHANNELS,
+        n_blocks: int = DEFAULT_N_BLOCKS,
     ) -> None:
         super().__init__()
         self.num_planes = num_planes
@@ -149,8 +149,8 @@ class CarcassonneNet(nn.Module):
         as stored in a checkpoint or a run config); missing keys take the defaults."""
         return cls(
             num_planes=int(arch.get("num_planes", NUM_PLANES)),
-            channels=int(arch.get("channels", _DEFAULT_CHANNELS)),
-            n_blocks=int(arch.get("n_blocks", _DEFAULT_N_BLOCKS)),
+            channels=int(arch.get("channels", DEFAULT_CHANNELS)),
+            n_blocks=int(arch.get("n_blocks", DEFAULT_N_BLOCKS)),
         )
 
     def forward(

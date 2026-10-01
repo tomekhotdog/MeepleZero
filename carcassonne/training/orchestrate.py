@@ -64,7 +64,7 @@ import torch
 from carcassonne.agents.mcts import MctsConfig
 from carcassonne.nn import checkpoint
 from carcassonne.nn.encode import NUM_PLANES
-from carcassonne.nn.model import CarcassonneNet
+from carcassonne.nn.model import DEFAULT_CHANNELS, DEFAULT_N_BLOCKS, CarcassonneNet
 from carcassonne.training.arena import gate, yardstick
 from carcassonne.training.buffer import ReplayBuffer
 from carcassonne.training.learner import Learner, LearnerConfig
@@ -87,8 +87,8 @@ class TrainConfig:
     gate_games: int = 20
     window_games: int = 2000  # buffer eviction window
     mcts_sims: int = 100  # self-play + gating sims
-    channels: int = 64
-    n_blocks: int = 5
+    channels: int = DEFAULT_CHANNELS  # the model owns the arch defaults
+    n_blocks: int = DEFAULT_N_BLOCKS
     seed: int = 0
     # learner knobs (passed through to LearnerConfig)
     lr: float = 1e-3
