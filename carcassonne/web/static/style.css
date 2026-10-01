@@ -899,6 +899,15 @@ dialog .actions {
 .delta-chip.p1 {
   color: var(--p1);
 }
+.delta-chip.p2 {
+  color: var(--p2);
+}
+.delta-chip.p3 {
+  color: var(--p3);
+}
+.delta-chip.p4 {
+  color: var(--p4);
+}
 
 /* Search panel — the signature exhibit. */
 #search-value {
@@ -1035,6 +1044,40 @@ dialog .actions {
 }
 .score-sep {
   color: var(--bone-dim);
+}
+/* 3-5 players: per-seat score chips (swatch + "P{n} pts") replace the readout. */
+#score-seats {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px 14px;
+  margin-bottom: 8px;
+}
+#score-readout[hidden],
+#score-seats[hidden] {
+  display: none;
+}
+.score-chip {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--serif);
+  font-size: 18px;
+  line-height: 1.2;
+}
+.score-chip.p0 {
+  color: var(--p0);
+}
+.score-chip.p1 {
+  color: var(--p1);
+}
+.score-chip.p2 {
+  color: var(--p2);
+}
+.score-chip.p3 {
+  color: var(--p3);
+}
+.score-chip.p4 {
+  color: var(--p4);
 }
 #score-chart {
   display: block;

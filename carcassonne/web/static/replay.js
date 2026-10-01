@@ -16,7 +16,7 @@ import {
   screenToCellFloat,
   worldToScreen,
 } from "./board.js";
-import { TOKENS, featureAnchor, drawTile, drawMeepleGlyph } from "./tiles.js";
+import { TOKENS, featureAnchor, drawTile, drawMeepleGlyph, playerColor } from "./tiles.js";
 import {
   drawMoveRing,
   drawTileHighlight,
@@ -40,10 +40,11 @@ let chartsDirty = true;
 const R = {
   tiledefs: null,
   data: null, // full /api/replays/{name} response
+  np: 2, // seat count of the loaded replay (2..5); set once per replay in loadReplay
   index: 0, // current position: 0..moves.length
   moveRows: null, // <button> per move, built once per replay; index-aligned to moves
-  winprob: [], // per-move {p: prob for player 0, known: bool}, length moves.length
-  scores: [], // (③) per-position [p0, p1] running score, length states.length (M+1)
+  winprob: [], // per-move {p: prob for player 0, known: bool}, length moves.length; [] unless np === 2
+  scores: [], // (③) per-position [p0, .., pN-1] running score, length states.length (M+1)
   scoreMax: 1, // (③) y-axis top for the score chart (max score reached, min 1)
   cam: { x: 0, y: 0, zoom: 1 },
   drag: null,
@@ -80,7 +81,12 @@ ghostTip.id = "ghost-tip";
 ghostTip.setAttribute("role", "tooltip");
 stage.append(ghostTip);
 
-const playerColor = (p) => (p === 0 ? TOKENS.p0 : TOKENS.p1);
+// Seat labels shown to the user are 1-indexed (P1..P5), matching the Play view's
+// seatName; seat indices in the data stay 0-based.
+const seatLabel = (p) => `P${p + 1}`;
+
+// Seat indices 0..R.np-1, for every per-seat loop.
+const seats = () => Array.from({ length: R.np }, (_, p) => p);
 
 // --- server calls ------------------------------------------------------------
 
@@ -101,7 +107,13 @@ function describeReplay(m) {
   const agents = (m.agents ?? []).join(" vs ");
   const fs = m.final_scores ? m.final_scores.join("–") : "?";
   const ws = m.winners ?? [];
-  const win = ws.length === 1 ? `P${ws[0]} won` : "draw";
+  const np = m.final_scores?.length ?? 2;
+  const win =
+    ws.length === np
+      ? "draw"
+      : ws.length === 1
+        ? `${seatLabel(ws[0])} won`
+        : `tie: ${ws.map(seatLabel).join(" & ")}`;
   const when = (m.started_at ?? "").replace("T", " ").slice(0, 16);
   return `${agents} · ${when} · ${fs} · ${win}`;
 }
@@ -139,7 +151,12 @@ async function loadReplay(name) {
     return;
   }
   R.cam = { x: 0, y: 0, zoom: 1 };
-  buildWinProb();
+  R.np = R.data.header.config.num_players ?? R.data.final_scores.length;
+  // Win probability (and the lead-change markers derived from it) is a 2-player
+  // AI-belief feature: annot.value is zero-sum, so "P0 win%" only means
+  // something head-to-head. 3-5 player replays carry no annots anyway.
+  if (R.np === 2) buildWinProb();
+  else R.winprob = [];
   buildScore();
   buildKeyMoments();
   buildMoveList();
@@ -151,13 +168,18 @@ async function loadReplay(name) {
   renderKeyMoments();
   $("empty-hint").style.display = "none";
   $("scrubber").hidden = false;
-  $("winprob-panel").hidden = false;
-  $("winprob-axis").textContent = `move 0 → ${M} · higher = blue (P0) ahead`;
+  $("winprob-panel").hidden = R.np !== 2;
+  $("winprob-axis").textContent = `move 0 → ${M} · higher = blue (P1) ahead`;
   $("score-panel").hidden = false;
-  $("score-axis").textContent = `move 0 → ${M} · points · blue P0 · red P1`;
+  $("score-readout").hidden = R.np !== 2;
+  $("score-seats").hidden = R.np === 2;
+  $("score-axis").textContent =
+    R.np === 2
+      ? `move 0 → ${M} · points · blue P1 · red P2`
+      : `move 0 → ${M} · points · one line per seat, in its colour`;
   $("deck-panel").hidden = false;
   $("supply-panel").hidden = false;
-  document.querySelector(".p0-name").textContent = `P0 ${R.data.header.agents[0]}`;
+  document.querySelector(".p0-name").textContent = `${seatLabel(0)} ${R.data.header.agents[0]}`;
   setIndex(0);
 }
 
@@ -319,7 +341,7 @@ function renderMoveInfo() {
   const who = $("move-who");
   who.replaceChildren(
     swatch(rec.player),
-    document.createTextNode(` ${rec.player === 0 ? "blue" : "red"} · ${R.data.header.agents[rec.player]}`)
+    document.createTextNode(` ${seatLabel(rec.player)} · ${R.data.header.agents[rec.player]}`)
   );
   $("move-detail").textContent = `${rec.tile} → ${moveLabel(rec.move)}`;
 
@@ -328,7 +350,7 @@ function renderMoveInfo() {
   const after = R.data.states[c + 1].scores;
   const delta = $("move-delta");
   delta.replaceChildren();
-  const gains = [0, 1].filter((p) => after[p] - before[p] !== 0);
+  const gains = seats().filter((p) => after[p] - before[p] !== 0);
   if (gains.length === 0) {
     delta.textContent = "no score this move";
     delta.className = "muted";
@@ -338,7 +360,7 @@ function renderMoveInfo() {
       const d = after[p] - before[p];
       const chip = document.createElement("span");
       chip.className = `delta-chip p${p}`;
-      chip.textContent = `${p === 0 ? "blue" : "red"} ${d >= 0 ? "+" : ""}${d}`;
+      chip.textContent = `${seatLabel(p)} ${d >= 0 ? "+" : ""}${d}`;
       delta.append(chip);
     }
   }
@@ -350,8 +372,8 @@ function sameMove(a, b) {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
-// P0-perspective win% for a move's annot, or null if it has no search data.
-// annot.value is the MOVING player's value in [-1, 1] (tanh); flip it to P0's
+// P0-perspective win% (seat 0, labelled "P1") for a move's annot, or null if it
+// has no search data. annot.value is the MOVING player's value in [-1, 1] (tanh); flip it to P0's
 // perspective and map to [0, 100] — the exact transform buildWinProb uses for
 // the win-probability chart, so this number always agrees with that chart.
 function winPctOf(rec) {
@@ -402,7 +424,7 @@ function renderSearchPanel() {
     }
   }
   valueEl.replaceChildren();
-  valueEl.append(document.createTextNode("P0 win: "));
+  valueEl.append(document.createTextNode(`${seatLabel(0)} win: `));
   const pctEl = document.createElement("span");
   pctEl.className = "ai"; // --ai accents the win% only, not the delta
   pctEl.textContent = `${winPct}%`;
@@ -636,7 +658,7 @@ function buildWinProb() {
 }
 
 function drawWinProb() {
-  if (!R.data) return;
+  if (!R.data || R.np !== 2) return; // 2-player only; the panel is hidden otherwise
   const { w, h } = resizeToDisplay(winCanvas, winCanvas.getContext("2d"));
   const ctx = winCanvas.getContext("2d");
   ctx.clearRect(0, 0, w, h);
@@ -729,18 +751,30 @@ function buildScore() {
   const states = R.data.states;
   R.scores = states.map((s) => (s.terminal && s.final_scores ? s.final_scores : s.scores));
   let max = 1;
-  for (const [a, b] of R.scores) max = Math.max(max, a, b);
+  for (const s of R.scores) max = Math.max(max, ...s);
   R.scoreMax = max;
 }
 
-// Prominent P0 : P1 readout at the current step, states[R.index].scores.
+// Score at the current step, R.scores[R.index]: the prominent "P1 : P2" readout
+// for 2 players; one swatch + "P{n} pts" chip per seat for 3-5 players.
 function renderScoreReadout() {
   const s = R.data ? R.scores[R.index] : null;
-  $("score-p0").textContent = s ? String(s[0]) : "0";
-  $("score-p1").textContent = s ? String(s[1]) : "0";
+  if (R.np === 2) {
+    $("score-p0").textContent = s ? String(s[0]) : "0";
+    $("score-p1").textContent = s ? String(s[1]) : "0";
+    return;
+  }
+  const chips = seats().map((p) => {
+    const chip = document.createElement("span");
+    chip.className = `score-chip p${p}`;
+    chip.title = R.data.header.agents[p];
+    chip.append(swatch(p), document.createTextNode(`${seatLabel(p)} ${s ? s[p] : 0}`));
+    return chip;
+  });
+  $("score-seats").replaceChildren(...chips);
 }
 
-// Mirror of drawWinProb: two lines (P0 blue, P1 red) of running points vs
+// Mirror of drawWinProb: one line per seat, in its colour, of running points vs
 // position i (0..M), a mono axis, and a vertical marker at the current step.
 function drawScore() {
   if (!R.data) return;
@@ -774,8 +808,8 @@ function drawScore() {
   ctx.lineTo(padL + plotW, yAt(0));
   ctx.stroke();
 
-  // Two lines: P0 (blue), P1 (red).
-  for (const p of [0, 1]) {
+  // One line per seat, in the seat's colour.
+  for (const p of seats()) {
     ctx.strokeStyle = playerColor(p);
     ctx.lineWidth = 1.5;
     ctx.beginPath();
@@ -985,20 +1019,20 @@ function renderDeck() {
 
 // Per-player follower supply at the current step, mirroring the Play view's
 // score-card pips (see app.js): 7 meeple pips (filled while still in supply)
-// plus an abbot pip. states[R.index].meeples is [p0, p1] plain meeples in supply
-// (0..7); .abbots is [p0, p1] with the abbot in supply. Rebuilt on every scrub;
-// 16 tiny canvases is cheap. `pip` is a faithful port of app.js's pip().
+// plus an abbot pip. states[R.index].meeples is per-seat plain meeples in supply
+// (0..7); .abbots is per-seat abbot-in-supply. Rebuilt on every scrub; ≤40 tiny
+// canvases is cheap. `pip` is a faithful port of app.js's pip().
 function renderSupply() {
   const rows = $("supply-rows");
   rows.replaceChildren();
   const view = R.data ? R.data.states[R.index] : null;
   if (!view) return;
-  for (const p of [0, 1]) {
+  for (const p of seats()) {
     const row = document.createElement("div");
     row.className = "supply-row";
     const who = document.createElement("div");
     who.className = "supply-who";
-    who.append(swatch(p), document.createTextNode(`P${p} ${R.data.header.agents[p]}`));
+    who.append(swatch(p), document.createTextNode(`${seatLabel(p)} ${R.data.header.agents[p]}`));
     const supply = document.createElement("div");
     supply.className = "supply";
     for (let i = 0; i < 7; i++) supply.append(pip(p, "meeple", i < view.meeples[p]));
@@ -1280,6 +1314,7 @@ function hidePanels() {
   $("deck-grid").replaceChildren();
   R.deckCells = null;
   $("supply-rows").replaceChildren();
+  $("score-seats").replaceChildren();
   $("empty-hint").style.display = "";
 }
 
