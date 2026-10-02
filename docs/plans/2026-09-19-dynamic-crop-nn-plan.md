@@ -1693,6 +1693,9 @@ baseline.
 - **Speedup vs baseline: 343.4 / 143.4 = 2.39× — FAIL against the ≥5× bar
   (≥717 games/hour).** The single-process target was not met. The run-to-run
   spread is about ±13%, which is nowhere near enough to close the gap.
+  Measurement caveat: `bench` builds an unseeded untrained net, so each run
+  plays different games even with `--seed 0`, and part of that spread
+  is game-to-game variation rather than timing noise.
 - Attribution: `--channels 64 --n-blocks 5` re-run on the current code, 3 times:
   ```
   params=404481
@@ -1718,8 +1721,8 @@ baseline.
   | 4 | 22.9s | 44.4s |
 
   Self-play speeds up **3.02×** with 4 workers on 4 physical cores, which is
-  close to linear. Combined with the 2.39× single-process speedup, 4-worker
-  self-play produces about 2.39 × 3.02 ≈ **7.2×** the baseline's games/hour on
+  ≈75% parallel efficiency (3.02× on 4 workers, Mac). Combined with the 2.39×
+  single-process speedup, 4-worker self-play produces about 2.39 × 3.02 ≈ **7.2×** the baseline's games/hour on
   this Mac. That is aggregate throughput, not the single-process bar above.
 - Deferred measurement: learner rotation cost (M12). Measured on the buffer
   from the 1-worker scaling run (568 examples / 8 games) at batch 256, 48×4,

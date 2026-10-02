@@ -53,7 +53,7 @@ def test_param_budget() -> None:
     assert param_count(CarcassonneNet()) <= 250_000  # design bar; expect ~192k
 
 
-def test_policy_flatten_matches_action_indexer_exactly() -> None:
+def test_policy_flatten_matches_flat_index_layout_exactly() -> None:
     """THE alignment proof for the most bug-prone reshape in the project.
 
     Fill the conv output with unique values so every (channel, gy, gx) slot is
@@ -74,7 +74,7 @@ def test_policy_flatten_matches_action_indexer_exactly() -> None:
         assert flat[0, idx] == t[0, rot * ACTIONS + a, gy, gx]
 
 
-def test_policy_head_matches_action_indexer() -> None:
+def test_policy_head_puts_mass_on_exactly_the_legal_moves() -> None:
     """End-to-end: masked softmax puts nonzero mass on exactly the legal set."""
     from carcassonne.nn.actions import legal_mask
 

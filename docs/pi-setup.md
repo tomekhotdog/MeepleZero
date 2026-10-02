@@ -43,9 +43,19 @@ uv run carcassonne train --run runs/pi-001 \
 (48 channels × 4 blocks is the default — ~193k params, sized for Pi inference;
 pass the flags explicitly so the run's config is self-describing. `--workers 4`
 is one self-play process per Pi 5 core; `--workers 0`, the default, means "one
-per CPU core" too. On `--resume`, the worker count comes from the current
-command, not from the run's `config.json`, so you can change it between
-restarts.)
+per CPU core" too.)
+
+**Which flags count on `--resume`.** `--channels` and `--n-blocks` only matter
+when a run is *created*: they are written to `config.json` and used to build the
+step-0 net. On `--resume` the nets are loaded from the checkpoints, which carry
+their own architecture, so arch flags passed then are ignored. Every other train
+flag (`--sims`, `--selfplay-games`, `--learn-steps`, `--gate-every`,
+`--gate-games`, `--window-games`, `--workers`, `--seed`, and the built-in
+learner settings such as the learning rate) is taken from the command line on
+*each* start, never from `config.json`, which is only a record of the creating
+command. A restart with different flags therefore continues the run with the
+new settings; omitted flags fall back to the CLI defaults, not to the values
+the run was created with.
 
 **Start from a fresh run directory.** Checkpoints are stamped with a format
 marker, and anything written before iteration 3 (the dynamic-crop net) is
@@ -91,8 +101,13 @@ run is in its learn or gate phase:
 
 ```bash
 free -m                                              # whole-box view
-ps -o pid,rss,command -C python3 | sort -k2 -n       # per-process RSS (KiB)
+# per-process RSS (KiB): the main process runs as the `carcassonne` console
+# script and the spawned self-play workers show up as `...spawn_main...`
+ps -eo pid,rss,args --sort=-rss | grep -E 'carcassonne|spawn_main' | grep -v grep
 ```
+
+(Not yet verified on the Pi: these commands can't be checked on the Mac. If the
+filter misses the workers, `pgrep -af python` lists every Python process.)
 
 If the 4-worker total pushes the Pi into swap, drop to `--workers 3`.
 
@@ -117,8 +132,8 @@ Type=simple
 User=pi
 WorkingDirectory=/home/pi/Carcasonne
 ExecStart=/home/pi/.local/bin/uv run carcassonne train --run runs/pi-001 --resume \
-  --channels 48 --n-blocks 4 --sims 100 --selfplay-games 20 --learn-steps 40 \
-  --gate-every 5 --gate-games 20 --workers 4
+  --sims 100 --selfplay-games 20 --learn-steps 40 \
+  --gate-every 5 --gate-games 20 --workers 4 --seed 0
 Restart=always
 RestartSec=10
 KillSignal=SIGTERM
@@ -133,12 +148,26 @@ sudo systemctl enable --now carcassonne-train
 journalctl -u carcassonne-train -f          # watch progress
 ```
 
-Before enabling the unit, create the run once with the "Start a run" command
-above. You can Ctrl-C it straight away, because `config.json` is written before
-the first iteration starts. The unit can't create the run itself: `--resume`
-refuses a directory with no `config.json`. Once the run exists, every restart
-continues it, and `Restart=always` plus the clean-stop handler let the run
-recover by itself after reboots.
+The unit's `ExecStart` has no `--channels`/`--n-blocks`: on `--resume` the
+architecture comes from the checkpoints (see "Which flags count on `--resume`"
+above). The other flags are repeated because they are read from the command
+line on every restart; keep them in step with the run's intended settings.
+
+Before enabling the unit, create the run once. The unit can't create it itself:
+`--resume` refuses a directory with no `config.json`. Run the "Start a run"
+command above with `--iterations 0` added:
+
+```bash
+uv run carcassonne train --run runs/pi-001 \
+  --channels 48 --n-blocks 4 --sims 100 \
+  --selfplay-games 20 --learn-steps 40 \
+  --gate-every 5 --gate-games 20 --workers 4 --seed 0 --iterations 0
+```
+
+This writes `config.json`, `train_state.json`, an empty `buffer.sqlite`, and the
+step-0 checkpoint (the initial `best`), plays no games, and exits 0. Once the run
+exists, every restart continues it, and `Restart=always` plus the clean-stop
+handler let the run recover by itself after reboots.
 
 ## Watch it from your Mac's browser
 
