@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import random
 from dataclasses import replace
+from typing import Any
 
 import numpy as np
 import pytest
@@ -378,25 +379,42 @@ def test_reused_root_annot_reports_total_visits() -> None:
 
 def test_node_expansion_enumerates_legal_moves_once(monkeypatch: pytest.MonkeyPatch) -> None:
     """Move generation is the engine's hot path: a leaf expansion must enumerate
-    legal moves once and hand them to the net, not have nn recompute them."""
+    legal moves once and hand them to the net, not have nn recompute them.
+
+    Two counters, so the test can't pass vacuously when imports move around:
+    - ``mcts.legal_moves`` is patched explicitly (monkeypatch raises if mcts no
+      longer binds that name), proving _make_node's enumeration is the counted one;
+    - the engine's own ``_current_placements`` -- looked up as a global inside
+      ``engine.legal_moves`` on every call -- counts *all* enumerations, however
+      the caller imported legal_moves (an aliased import in nn would show up here).
+    """
     import carcassonne.agents.mcts as mcts_mod
-    import carcassonne.nn.actions as actions_mod
-    import carcassonne.nn.model as model_mod
+    import carcassonne.core.engine as engine_mod
 
-    calls = 0
-    real = legal_moves
+    via_mcts = 0
+    real_legal_moves = mcts_mod.legal_moves
 
-    def counting(state: GameState) -> tuple[Move, ...]:
-        nonlocal calls
-        calls += 1
-        return real(state)
+    def counting_legal_moves(state: GameState) -> tuple[Move, ...]:
+        nonlocal via_mcts
+        via_mcts += 1
+        return real_legal_moves(state)
 
-    for mod in (mcts_mod, actions_mod, model_mod):
-        if hasattr(mod, "legal_moves"):
-            monkeypatch.setattr(mod, "legal_moves", counting)
+    anywhere = 0
+    real_placements = engine_mod._current_placements
+
+    def counting_placements(state: GameState) -> Any:
+        nonlocal anywhere
+        anywhere += 1
+        return real_placements(state)
+
+    monkeypatch.setattr(mcts_mod, "legal_moves", counting_legal_moves)
+    monkeypatch.setattr(engine_mod, "_current_placements", counting_placements)
 
     agent = MctsAgent(_net(), DEVICE, MctsConfig(sims=1))
-    node = agent._make_node(new_game(SEED))
-    assert calls == 1
-    assert len(node.moves) == len(node.prior)
-    assert abs(float(node.prior.sum()) - 1.0) < 1e-9
+    state = new_game(SEED)
+    for expansion in (1, 2):  # once per expansion, not once per agent
+        node = agent._make_node(state)
+        assert (via_mcts, anywhere) == (expansion, expansion)
+        assert len(node.moves) == len(node.prior)
+        assert abs(float(node.prior.sum()) - 1.0) < 1e-9
+        state = apply(state, node.moves[0])
