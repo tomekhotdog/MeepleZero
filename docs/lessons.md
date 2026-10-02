@@ -8,8 +8,9 @@
   stability. Chosen over moving `match.py` up into `agents/` because the match
   runner is cohesive with `game/replay.py`. Trade-off: the protocol sits apart
   from its implementations. Do not "tidy" it back into `agents/` — that
-  reintroduces an upward `game → agents` import that will trip TID251 layering
-  enforcement.
+  reintroduces an upward `game → agents` import that fails the layering test
+  (`tests/test_layering.py`, an AST walk over every import; ruff TID251 was
+  selected but never configured, so it enforced nothing — corrected 2026-10-02).
 
 - [decision] 2026-08-22 — **Pin `numpy>=1.26,<2` and `torch>=2.2,<2.3` (the `ml` extra).**
   Intel Mac (x86_64) has no torch wheels past 2.2.x, and torch 2.2.x was built

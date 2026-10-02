@@ -24,9 +24,10 @@ packages = ["carcassonne"]
 line-length = 100
 
 [tool.ruff.lint]
-# TID251: wire up banned-api config to enforce layering (core -> game -> agents/nn -> training/web)
-# once cross-layer imports exist (Phase 3+).
-select = ["E", "F", "I", "UP", "B", "TID251"]
+# Import layering (core -> game -> agents/nn -> training/web -> cli) is enforced by
+# tests/test_layering.py, not ruff: TID251 bans named APIs everywhere and cannot
+# express per-layer allow-lists.
+select = ["E", "F", "I", "UP", "B"]
 
 [tool.mypy]
 strict = true
