@@ -474,3 +474,28 @@ def test_opening_ai_moves_report_their_score_events(client: TestClient) -> None:
 def test_opening_events_empty_when_human_moves_first(client: TestClient) -> None:
     body = _create(client, opponents=["greedy"] * 4, num_players=5, human_player=0, seed=21)
     assert body["ai_moves"] == [] and body["events"] == []
+
+
+# --- e2e: CLI -> replay file -> web API (MP-T10) ----------------------------
+
+
+def test_five_player_cli_replay_serves_through_api(tmp_path: Path) -> None:
+    """A 5-player game simulated by the CLI must be listed and served intact by
+    the web API: every seat scored, the header's num_players preserved, and the
+    state trajectory one longer than the move list."""
+    from carcassonne.cli.main import main as cli_main
+
+    replays = tmp_path / "replays"
+    rc = cli_main(
+        ["simulate", "--agents", "greedy,random,random,random,random",
+         "--seed", "13", "--out", str(replays)]
+    )
+    assert rc == 0
+    client = TestClient(create_app(replays))
+    listed = client.get("/api/replays").json()["replays"]
+    assert len(listed) == 1 and len(listed[0]["final_scores"]) == 5
+    detail = client.get(f"/api/replays/{listed[0]['name']}").json()
+    assert detail["header"]["config"]["num_players"] == 5
+    assert detail["header"]["agents"] == ["greedy", "random", "random", "random", "random"]
+    assert len(detail["states"]) == len(detail["moves"]) + 1
+    assert detail["states"][-1]["terminal"] is True
