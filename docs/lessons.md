@@ -45,6 +45,18 @@
   lost — HEAD ended correct, 174 tests green. The venv/`.pth` iCloud issue above
   is real and independent.
 
+- [decision] 2026-10-02 — **The iteration-3 "≥5× single-process self-play" bar was
+  missed (3.51×) and accepted as a recorded FAIL.** Profile-driven engine work
+  (M18b: table-driven placements, meeple-claim via neighbour roots, carried
+  placements) doubled throughput with byte-identical games, guarded by a golden
+  engine digest (`tests/core/test_engine_golden.py` — never re-record it to make a
+  change pass). After that the net forward pass is 56% of self-play time; the
+  remaining lever is MCTS **leaf batching with virtual loss**, which changes the
+  search algorithm (games no longer identical; needs a strength check), so it
+  must go through `design`, not be patched in for speed. Pi throughput comes from
+  workers (≈8.8× aggregate with 4). Rejected: redefining the bar as aggregate
+  throughput (moves the goalposts).
+
 - [decision] 2026-09-30 — **MCTS subtree reuse is ON for training/arena, OFF for
   interactive checkpoint agents** (`agents/checkpoints.py` builds
   `MctsConfig(..., reuse_tree=False)`). Reuse exists for self-play throughput.
