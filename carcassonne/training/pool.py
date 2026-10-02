@@ -47,7 +47,6 @@ from typing import Any
 import torch
 
 from carcassonne.agents.mcts import MctsConfig
-from carcassonne.nn.checkpoint import _net_arch
 from carcassonne.nn.model import CarcassonneNet
 from carcassonne.training.buffer import Example
 from carcassonne.training.run import TrainingRun
@@ -129,7 +128,7 @@ class SelfplayPool:
             max_workers=workers,
             mp_context=mp.get_context("spawn"),
             initializer=_init_worker,
-            initargs=(_net_arch(net), state, mcts_config, str(run_root)),
+            initargs=(net.arch, state, mcts_config, str(run_root)),
         )
 
     def play(self, jobs: Iterable[Job]) -> Iterator[GameResult]:

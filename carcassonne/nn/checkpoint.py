@@ -18,7 +18,7 @@ from typing import Any
 
 import torch
 
-from carcassonne.nn.model import CarcassonneNet
+from carcassonne.nn.model import ARCH_KEYS, CarcassonneNet
 
 CHECKPOINT_FORMAT = 3  # bump when the payload or net layout breaks compatibility
 
@@ -41,14 +41,6 @@ def _filename(step: int) -> str:
     return f"{_PREFIX}{step:06d}{_SUFFIX}"
 
 
-def _net_arch(net: CarcassonneNet) -> dict[str, int]:
-    return {
-        "channels": net.channels,
-        "n_blocks": net.n_blocks,
-        "num_planes": net.num_planes,
-    }
-
-
 def save(
     directory: Path,
     step: int,
@@ -65,7 +57,7 @@ def save(
         "model_state": net.state_dict(),
         "optimizer_state": optimizer.state_dict() if optimizer is not None else None,
         "config": config,
-        "net_arch": _net_arch(net),
+        "net_arch": net.arch,
     }
     torch.save(payload, path)
     return path
@@ -87,14 +79,20 @@ def load(
 ) -> dict[str, Any]:
     """Restore a checkpoint.
 
-    Raises :class:`ValueError` if the payload's ``format`` isn't
-    :data:`CHECKPOINT_FORMAT` (an old run). If ``net`` is None, a fresh
-    :class:`CarcassonneNet` is built from the stored ``net_arch``.
+    Raises :class:`ValueError` if the file isn't a checkpoint dict or its
+    ``format`` isn't :data:`CHECKPOINT_FORMAT` (an old run). If ``net`` is None,
+    a fresh :class:`CarcassonneNet` is built from the stored ``net_arch``, which
+    must then carry every key in :data:`ARCH_KEYS` (ValueError naming the gap).
     Weights (and optimizer state, when both an optimizer and stored state are
     present) are loaded in place. Returns the payload dict augmented
     with the live ``net`` (and ``optimizer``).
     """
-    payload: dict[str, Any] = torch.load(path, map_location=device)
+    payload = torch.load(path, map_location=device)
+    if not isinstance(payload, dict):
+        raise ValueError(
+            f"checkpoint {path} is not a checkpoint payload (got {type(payload).__name__},"
+            f" expected the dict written by save())"
+        )
     fmt = payload.get("format")
     if fmt != CHECKPOINT_FORMAT:
         raise ValueError(
@@ -103,7 +101,7 @@ def load(
         )
 
     if net is None:
-        net = CarcassonneNet.from_arch(payload["net_arch"])
+        net = CarcassonneNet.from_arch(_stored_arch(path, payload))
     net.load_state_dict(payload["model_state"])
     net.to(device)
 
@@ -113,3 +111,16 @@ def load(
     payload["net"] = net
     payload["optimizer"] = optimizer
     return payload
+
+
+def _stored_arch(path: Path, payload: dict[str, Any]) -> dict[str, Any]:
+    """The payload's ``net_arch``, required complete. Unlike run-config creation
+    (where :meth:`CarcassonneNet.from_arch` defaults fill gaps on purpose), a
+    checkpoint must rebuild exactly the shape it was saved with."""
+    arch = payload.get("net_arch")
+    if not isinstance(arch, dict):
+        raise ValueError(f"checkpoint {path} has no net_arch dict (got {arch!r})")
+    for key in ARCH_KEYS:
+        if key not in arch:
+            raise ValueError(f"checkpoint {path} net_arch is missing {key!r}: {arch!r}")
+    return arch

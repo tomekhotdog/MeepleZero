@@ -108,6 +108,10 @@ def _policy_head_flatten(logits: torch.Tensor) -> torch.Tensor:
     return logits.reshape(n, h * w * ACTIONS_PER_CELL)
 
 
+# The keys of an arch dict (see CarcassonneNet.from_arch / .arch).
+ARCH_KEYS = ("num_planes", "channels", "n_blocks")
+
+
 class CarcassonneNet(nn.Module):
     """Size-agnostic residual CNN: shared trunk, per-cell policy head, pooled
     value head.
@@ -152,6 +156,16 @@ class CarcassonneNet(nn.Module):
             channels=int(arch.get("channels", DEFAULT_CHANNELS)),
             n_blocks=int(arch.get("n_blocks", DEFAULT_N_BLOCKS)),
         )
+
+    @property
+    def arch(self) -> dict[str, int]:
+        """The inverse of :meth:`from_arch`: every key needed to rebuild this
+        net's shape (what checkpoints store and pool workers are sent)."""
+        return {
+            "num_planes": self.num_planes,
+            "channels": self.channels,
+            "n_blocks": self.n_blocks,
+        }
 
     def forward(
         self,

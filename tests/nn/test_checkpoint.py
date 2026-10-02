@@ -137,3 +137,41 @@ def test_load_rejects_foreign_format_with_one_clear_error(tmp_path: Path, fmt: i
         assert str(path) in msg
         assert f"format {fmt}" in msg
         assert "Missing key" not in msg
+
+
+@pytest.mark.parametrize("payload", [[1, 2, 3], torch.zeros(2), "step_000001", None])
+def test_load_rejects_non_dict_payload_with_clear_error(tmp_path: Path, payload: object) -> None:
+    """A .pt that isn't a checkpoint dict (a bare tensor, a list...) must get the
+    same kind of clear ValueError as a foreign format, not an AttributeError
+    from poking at it as a dict."""
+    path = tmp_path / "step_000001.pt"
+    torch.save(payload, path)
+    with pytest.raises(ValueError, match="not a checkpoint payload") as exc:
+        load(path, torch.device("cpu"))
+    assert str(path) in str(exc.value)
+
+
+@pytest.mark.parametrize("missing", ["num_planes", "channels", "n_blocks"])
+def test_load_without_net_requires_complete_stored_arch(tmp_path: Path, missing: str) -> None:
+    """Rebuilding from a checkpoint must use exactly the stored shape. Filling a
+    missing key from today's model defaults would build a different net and fail
+    later with a state_dict shape wall -- or, worse, load silently if the
+    default happens to match. Name the missing key instead."""
+    path = save(tmp_path, step=1, net=_net())
+    payload = torch.load(path)
+    del payload["net_arch"][missing]
+    torch.save(payload, path)
+    with pytest.raises(ValueError, match=rf"net_arch.*missing.*{missing}") as exc:
+        load(path, torch.device("cpu"))
+    assert str(path) in str(exc.value)
+    # A live net makes the stored arch irrelevant: still loads.
+    assert load(path, torch.device("cpu"), net=_net())["step"] == 1
+
+
+def test_load_without_net_rejects_missing_net_arch(tmp_path: Path) -> None:
+    path = save(tmp_path, step=1, net=_net())
+    payload = torch.load(path)
+    del payload["net_arch"]
+    torch.save(payload, path)
+    with pytest.raises(ValueError, match="net_arch"):
+        load(path, torch.device("cpu"))

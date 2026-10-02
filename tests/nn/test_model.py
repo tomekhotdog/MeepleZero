@@ -19,6 +19,7 @@ from carcassonne.nn.actions import (
 )
 from carcassonne.nn.encode import NUM_PLANES, encode_state, valid_mask
 from carcassonne.nn.model import (
+    ARCH_KEYS,
     CarcassonneNet,
     _policy_head_flatten,
     evaluate_state,
@@ -47,6 +48,17 @@ def test_from_arch_defaults_and_round_trip() -> None:
     arch = {"num_planes": NUM_PLANES, "channels": 16, "n_blocks": 2}
     net = CarcassonneNet.from_arch(arch)
     assert (net.num_planes, net.channels, net.n_blocks) == (NUM_PLANES, 16, 2)
+
+
+def test_arch_is_the_inverse_of_from_arch() -> None:
+    """``net.arch`` is what checkpoints and pool workers ship to rebuild a net, so
+    it must carry every from_arch key -- a missing one would be silently
+    default-filled on the other side and build a differently shaped net."""
+    arch = {"num_planes": NUM_PLANES, "channels": 16, "n_blocks": 2}
+    net = CarcassonneNet.from_arch(arch)
+    assert net.arch == arch
+    assert tuple(net.arch) == ARCH_KEYS  # checkpoint validation requires exactly these
+    assert CarcassonneNet.from_arch(net.arch).arch == arch
 
 
 def test_param_budget() -> None:
