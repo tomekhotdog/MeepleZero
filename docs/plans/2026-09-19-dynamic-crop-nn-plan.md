@@ -1782,6 +1782,76 @@ directly comparable** to the unseeded `--games 2` numbers above.
   load average was about 7–13 on 8 logical cores. With the net seeded, the
   runs should play the same games, so most of the spread is timing noise
   (game identity across runs was not verified separately).
+- **After, interleaved A/B** (2026-10-02, Task 5). A = pre-optimisation tree
+  c206c19 (exported with `git archive`, run with `PYTHONPATH` = export dir;
+  `carcassonne.__file__` checked to resolve to the export), B = HEAD c756aa7.
+  Each run is `caffeinate -dims ... bench --games 6 --sims 16 --seed 0` at the
+  48×4 defaults, in the order A, B, A, B, A, B. Machine load at the start:
+  load average 4.3 on 8 logical cores, with Chrome (≈20% plus renderer
+  helpers at ≈12% and ≈11%) and WindowServer (≈29%) busy. Load was ≈6–7 by the
+  end, with a Chrome helper at ≈35% and an `mdworker` spike.
+  ```
+  params=192673
+  A1 games=6 sims=16 channels=48 n_blocks=4 total=89.0s s/game=14.8 games/hour=242.6
+  B1 games=6 sims=16 channels=48 n_blocks=4 total=41.9s s/game=7.0 games/hour=516.0
+  A2 games=6 sims=16 channels=48 n_blocks=4 total=84.9s s/game=14.2 games/hour=254.4
+  B2 games=6 sims=16 channels=48 n_blocks=4 total=42.9s s/game=7.2 games/hour=503.0
+  A3 games=6 sims=16 channels=48 n_blocks=4 total=85.5s s/game=14.2 games/hour=252.8
+  B3 games=6 sims=16 channels=48 n_blocks=4 total=58.3s s/game=9.7 games/hour=370.2
+  ```
+  Wall-clock time matched `total` for all six runs, so the machine did not
+  sleep. B3 was slowed by load, not sleep, and was kept.
+  **Median before 252.8 g/h, median after 503.0 g/h, speedup 1.99×.**
+  Against the iteration-1 baseline: 503.0 / 143.4 = **3.51×. The bar is ≥717
+  g/h (5×), so this is a FAIL.** The cumulative M18 + M18b gain is 3.51×.
+- **The same games are played.** Bench game 0 (seed 0, seeded 48×4 net, sims
+  16) was played once on each tree and the two replays were compared field by
+  field. All 71 moves, every annotation's priors and visit counts, the
+  per-move scores and the final scores `[7, 13]` match exactly. The only
+  difference is `think_ms`, which is timing. So the golden-digest promise
+  also holds at the self-play level: the engine work changed speed, not play.
+- **Worker scaling**, re-checked with the M18 method:
+  `train --run <fresh dir> --sims 8 --selfplay-games 8 --learn-steps 1
+  --iterations 1`. Self-play was timed from the end of `_establish_nets` to the
+  first `evict_to` with a scratch monkeypatch wrapper, so pool spawn is
+  included. Runs were interleaved as 1, 4, 1, 4:
+  | workers | self-play | total wall-clock |
+  |---|---|---|
+  | 1 | 31.1s / 35.4s | 48.7s / 55.8s |
+  | 4 | 12.6s / 13.8s | 42.9s / 37.2s |
+
+  Scaling is **2.47× and 2.57× (≈2.5×)**, down from 3.02× in M18 (69.2s vs
+  22.9s). Single-worker self-play is ≈2× faster, so the fixed cost of spawning
+  the pool and loading the net is now a larger share of a phase that only plays
+  8 games. That cost was not measured on its own. Aggregate throughput with 4
+  workers is about 3.51 × 2.5 ≈ 8.8× the baseline.
+- **Remaining profile** (HEAD, one seeded bench game, 48×4, sims 16).
+  `perf_counter` wrappers on the hot calls were combined into exclusive
+  buckets that sum to the game time. The machine was loaded (load average ≈9)
+  and the wrappers add overhead, so the shares matter more than the absolute
+  times.
+  | bucket | seed 0 (10.9s) | seed 1 (11.3s) |
+  |---|---|---|
+  | net forward + softmax (`evaluate_state` minus encode/crop/indices) | 55.2% | 57.0% |
+  | `encode_state` | 16.4% | 16.5% |
+  | `legal_moves` | 14.2% | 13.3% |
+  | `apply` (MCTS expand) | 8.6% | 7.9% |
+  | `move_indices` | 2.3% | 2.1% |
+  | outside search (self-play apply, replay, annotation) | 1.4% | 1.3% |
+  | `_make_node` rest | 0.7% | 0.7% |
+  | MCTS select (PUCT) | 0.6% | 0.6% |
+  | MCTS backup + descent loop | 0.2% | 0.2% |
+  | `Crop.of` | 0.2% | 0.2% |
+  | search rest (stash, noise) | 0.2% | 0.1% |
+
+  The game makes 1,121 net evaluations, one per expanded leaf. The net is now
+  ≈56% of the time. Reaching 717 g/h needs 717 / 503 = 1.43×, which means
+  total time must fall to 70%. Removing every bit of non-net work would give
+  at most ≈1.8×. Engine and encoding work alone (≈41%) would have to shrink
+  by about two thirds to reach the bar. The bigger lever is net-forward cost,
+  through leaf batching or fewer, larger forward passes. Next-step candidates
+  for the orchestrator: incremental `encode_state` (≈16%), leaf batching, and
+  `legal_moves` + `apply` (≈22% together).
 
 ## Deferred (explicitly)
 

@@ -347,7 +347,7 @@ git commit -m "perf(core): meeple-claim check via neighbour roots, no per-placem
 
 ---
 
-### Task 4: B — carry the drawn tile's placements on GameState (self-validating) ✅ DONE (placements_cache=(board obj, tile id, placements), compare=False, used only while board `is` and tile id match; draw_playable returns placements; stale-board/stale-tile/pickle/equality tests; golden digest unchanged; MCTS sims=64 interleaved 326→300 / 353→345 ms/move)
+### Task 4: B — carry the drawn tile's placements on GameState (self-validating) ✅ DONE (c756aa7; placements_cache=(board obj, tile id, placements), compare=False, used only while board `is` and tile id match; draw_playable returns placements; stale-board/stale-tile/pickle/equality tests; golden digest unchanged; MCTS sims=64 interleaved 326→300 / 353→345 ms/move)
 **Depends on:** Task 3
 
 **Files:**
@@ -455,7 +455,7 @@ git commit -m "perf(core): carry the drawn tile's placements on GameState (self-
 
 ---
 
-### Task 5: "After" measurement + decision
+### Task 5: "After" measurement + decision ✅ DONE (FAIL vs ≥717 g/h: interleaved A/B medians 252.8 → 503.0 g/h = 1.99× engine speedup, 3.51× baseline; same seeded games on both trees; 4-worker scaling ≈2.5× (was 3.02×); remaining split: net forward ≈56%, encode_state ≈16%, legal_moves ≈14%, apply ≈8%)
 **Depends on:** Task 4
 
 **Files:**
