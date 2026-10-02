@@ -1,4 +1,7 @@
-from carcassonne.core.placement import fits, placements_for_tile
+import random
+
+from carcassonne.core import GameConfig, apply, is_terminal, legal_moves, new_game
+from carcassonne.core.placement import fits, frontier, placements_for_tile
 from carcassonne.core.state import PlacedTile, empty_board_with_start
 from carcassonne.core.tiles import TILE_TYPES
 from carcassonne.core.types import Pos, Rotation
@@ -42,3 +45,30 @@ def test_no_floating_placements() -> None:
     board = empty_board_with_start()
     placs = placements_for_tile(board, TILE_TYPES["B"])
     assert all(abs(p.x) + abs(p.y) == 1 for p, _ in placs)  # only adjacent to start
+
+
+def _reference_placements(board, tt):
+    return [(p, r) for p in sorted(frontier(board)) for r in Rotation if fits(board, tt, p, r)]
+
+
+def test_placements_match_reference_for_every_tile_type_on_real_boards() -> None:
+    for seed in range(4):
+        rng = random.Random(seed)
+        state = new_game(seed, GameConfig())
+        n = 0
+        while not is_terminal(state):
+            if n % 6 == 0:  # sample boards across the whole game
+                for tt in TILE_TYPES.values():
+                    expected = _reference_placements(state.board, tt)
+                    assert placements_for_tile(state.board, tt) == expected
+            state = apply(state, rng.choice(legal_moves(state)))
+            n += 1
+
+
+def test_placement_table_is_used(monkeypatch) -> None:
+    """The hot path must not fall back to per-rotation fits() calls."""
+    import carcassonne.core.placement as pl
+
+    monkeypatch.setattr(pl, "fits", lambda *a: (_ for _ in ()).throw(AssertionError("fits called")))
+    state = new_game(0, GameConfig())
+    assert placements_for_tile(state.board, TILE_TYPES[state.current_tile])

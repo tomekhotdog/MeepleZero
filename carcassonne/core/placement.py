@@ -34,6 +34,41 @@ def fits(board: Board, tt: TileType, pos: Pos, rot: Rotation) -> bool:
     return touching
 
 
+_DELTAS = ((0, 1), (1, 0), (0, -1), (-1, 0))  # indexed by Side; must match Pos.neighbor
+_ROTATIONS = tuple(Rotation)
+
+# _EDGES[type_id][rotation][world_side] -> EdgeKind: world_edge() for every tile
+# type and rotation, precomputed once (placement enumeration is the self-play
+# hot path -- it runs on every MCTS expansion).
+_EDGES = {
+    tid: tuple(tuple(world_edge(tt, r, s) for s in Side) for r in Rotation)
+    for tid, tt in TILE_TYPES.items()
+}
+
+
 def placements_for_tile(board: Board, tt: TileType) -> list[tuple[Pos, Rotation]]:
-    """All legal placements, deterministically ordered by (Pos, Rotation)."""
-    return [(p, r) for p in sorted(frontier(board)) for r in Rotation if fits(board, tt, p, r)]
+    """All legal placements, deterministically ordered by (Pos, Rotation).
+
+    Same result as filtering frontier() x Rotation through fits(), but with one
+    neighbour lookup per frontier cell and side, and edges read from _EDGES."""
+    occupied = {(p.x, p.y): placed for p, placed in board.items()}
+    front = {
+        (x + dx, y + dy)
+        for (x, y) in occupied
+        for dx, dy in _DELTAS
+        if (x + dx, y + dy) not in occupied
+    }
+    mine = _EDGES[tt.id]
+    out: list[tuple[Pos, Rotation]] = []
+    for x, y in sorted(front):  # (x, y) tuple order == Pos order (order=True, fields x, y)
+        need = []
+        for side, (dx, dy) in enumerate(_DELTAS):
+            placed = occupied.get((x + dx, y + dy))
+            if placed is not None:
+                need.append((side, _EDGES[placed.type_id][placed.rotation][(side + 2) % 4]))
+        pos = Pos(x, y)
+        for r in _ROTATIONS:
+            edges = mine[r]
+            if all(edges[s] is kind for s, kind in need):
+                out.append((pos, r))
+    return out

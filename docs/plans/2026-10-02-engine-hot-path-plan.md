@@ -13,7 +13,7 @@
 
 ---
 
-### Task 1: Golden engine digest + seeded bench + "before" measurement ✅ DONE (c206c19 + <this commit>; before median 210.0 g/h under load — Task 5 re-measures interleaved)
+### Task 1: Golden engine digest + seeded bench + "before" measurement ✅ DONE (c206c19 + 06aabb8; before median 210.0 g/h under load — Task 5 re-measures interleaved)
 **Depends on:** none
 
 **Files:**
@@ -99,7 +99,7 @@ git commit -m "test(core): golden engine digest; seeded bench (M18b baseline)"
 
 ---
 
-### Task 2: D — table-driven `placements_for_tile`
+### Task 2: D — table-driven `placements_for_tile` ✅ DONE (precomputed _EDGES table + tuple frontier; equivalence vs fits()-reference on all tile types; golden digest unchanged; micro-bench 2495→379 µs/call)
 **Depends on:** Task 1
 
 **Files:**
