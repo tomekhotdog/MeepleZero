@@ -13,7 +13,7 @@
 
 ---
 
-### Task 1: Golden engine digest + seeded bench + "before" measurement
+### Task 1: Golden engine digest + seeded bench + "before" measurement ✅ DONE (c206c19 + <this commit>; before median 210.0 g/h under load — Task 5 re-measures interleaved)
 **Depends on:** none
 
 **Files:**
@@ -462,7 +462,7 @@ git commit -m "perf(core): carry the drawn tile's placements on GameState (self-
 - Modify: `docs/plans/2026-09-19-dynamic-crop-nn-plan.md` (Results → "M18b engine hot path")
 
 **Steps:**
-1. Idle machine, lid open: `for i in 1 2 3; do caffeinate -dims uv run python -m carcassonne.cli.main bench --games 6 --sims 16 --seed 0; done` → record three lines + median as **after**; speedup vs Task 1 **before**; vs the 143.4 baseline (bar ≥717 games/hour → PASS/FAIL stated plainly).
+1. **Interleaved A/B bench** (Task 1's "before" was taken under load — Chrome ~60% of a core, one run 30% slow — so before/after must be measured in the same session). Export the pre-optimisation tree without touching git state: `mkdir -p <scratchpad>/before && git archive c206c19 | tar -x -C <scratchpad>/before`, then alternate 3× each: `(cd <scratchpad>/before && caffeinate -dims uv run python -m carcassonne.cli.main bench --games 6 --sims 16 --seed 0)` and the same in the repo (HEAD). Record all six lines, medians, and speedup = after/before; then vs the 143.4 baseline (bar ≥717 games/hour → PASS/FAIL stated plainly). Before starting, record `ps -Ao %cpu,command | sort -rn | head -5` to document machine load.
 2. Worker scaling re-check (same command as M18: `train --sims 8 --selfplay-games 8 --learn-steps 1 --iterations 1 --workers 1` vs `--workers 4`, fresh scratch run dirs) → record.
 3. If FAIL: do NOT optimise further in this task. Report the remaining profile split; the orchestrator plans the next step (candidates: incremental `encode_state` ≈1.2×, leaf batching ≈1.15×).
 4. Commit:
