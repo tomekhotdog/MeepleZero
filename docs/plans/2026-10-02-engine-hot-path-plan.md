@@ -196,7 +196,7 @@ git commit -m "perf(core): table-driven placement enumeration (golden digest unc
 
 ---
 
-### Task 3: C — meeple-claim check without integrating the tile ✅ DONE (_claimed_on_placement via neighbour roots, no _integrated in legal_moves; equals reference on 12 games incl. 3346 claimed-feature cases; sibling-bridge tile invariant pinned by test; golden digest unchanged; micro-bench 1587→563 µs/call)
+### Task 3: C — meeple-claim check without integrating the tile ✅ DONE (245659a; _claimed_on_placement via neighbour roots, no _integrated in legal_moves; equals reference on 12 games incl. 3346 claimed-feature cases; sibling-bridge tile invariant pinned by test; golden digest unchanged; micro-bench 1587→563 µs/call)
 **Depends on:** Task 2
 
 **Files:**
@@ -347,7 +347,7 @@ git commit -m "perf(core): meeple-claim check via neighbour roots, no per-placem
 
 ---
 
-### Task 4: B — carry the drawn tile's placements on GameState (self-validating)
+### Task 4: B — carry the drawn tile's placements on GameState (self-validating) ✅ DONE (placements_cache=(board obj, tile id, placements), compare=False, used only while board `is` and tile id match; draw_playable returns placements; stale-board/stale-tile/pickle/equality tests; golden digest unchanged; MCTS sims=64 interleaved 326→300 / 353→345 ms/move)
 **Depends on:** Task 3
 
 **Files:**

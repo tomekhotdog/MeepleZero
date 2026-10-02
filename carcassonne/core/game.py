@@ -31,7 +31,7 @@ def new_game(seed: int, config: GameConfig = _DEFAULT_CONFIG) -> GameState:
     random.Random(seed).shuffle(tiles)
     board = empty_board_with_start()
     features = FeatureIndex.empty().with_tile(board, Pos(0, 0))
-    current, deck, discarded = draw_playable(board, tuple(tiles))
+    current, deck, discarded, placements = draw_playable(board, tuple(tiles))
     m = config.meeples_per_player
     return GameState(
         board=board,
@@ -46,6 +46,7 @@ def new_game(seed: int, config: GameConfig = _DEFAULT_CONFIG) -> GameState:
         discarded=discarded,
         last_events=(),
         turn=0,
+        placements_cache=(board, current, placements) if current is not None else None,
     )
 
 

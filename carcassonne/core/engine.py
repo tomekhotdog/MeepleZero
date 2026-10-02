@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Sequence
+from dataclasses import dataclass, field
 
 from carcassonne.core.features import FeatureData, FeatureIndex, Meeple, NodeId
 from carcassonne.core.placement import fits, placements_for_tile
@@ -41,6 +42,15 @@ class GameState:
     discarded: tuple[str, ...]       # unplaceable tiles set aside
     last_events: tuple[ScoreEvent, ...]
     turn: int
+    # Placements of current_tile on `board`, computed while drawing it (apply /
+    # new_game) so legal_moves needn't recompute them. Self-validating: used only
+    # while the recorded board object and tile id still match -- a
+    # dataclasses.replace() with a new board (learner.rotate_state_90) leaves it
+    # stale, and it is then ignored. compare=False: never part of state equality
+    # (MCTS subtree reuse matches states with ==).
+    placements_cache: tuple[Board, str, tuple[tuple[Pos, Rotation], ...]] | None = field(
+        default=None, compare=False, repr=False
+    )
 
 
 def legal_moves(state: GameState) -> tuple[Move, ...]:
@@ -55,7 +65,7 @@ def legal_moves(state: GameState) -> tuple[Move, ...]:
     has_abbot = state.abbots[p]
     can_retrieve = state.abbot_at[p] is not None
     moves: list[Move] = []
-    for pos, rot in placements_for_tile(state.board, tt):
+    for pos, rot in _current_placements(state):
         moves.append(Move(pos, rot, None))
         if has_meeple or has_abbot:
             for i, f in enumerate(tt.features):
@@ -74,6 +84,15 @@ def legal_moves(state: GameState) -> tuple[Move, ...]:
         if can_retrieve:
             moves.append(Move(pos, rot, RetrieveAbbot()))
     return tuple(moves)
+
+
+def _current_placements(state: GameState) -> Sequence[tuple[Pos, Rotation]]:
+    """Placements of the current tile -- carried from the draw when still valid."""
+    cache = state.placements_cache
+    if cache is not None and cache[0] is state.board and cache[1] == state.current_tile:
+        return cache[2]
+    assert state.current_tile is not None  # callers handle the terminal state first
+    return placements_for_tile(state.board, TILE_TYPES[state.current_tile])
 
 
 def _claimed_on_placement(
@@ -193,7 +212,7 @@ def apply(state: GameState, move: Move) -> GameState:
             idx = idx.without_feature_meeples((q, i))
 
     # Draw the next playable tile; set aside unplaceable ones.
-    current, deck, set_aside = draw_playable(board, state.deck)
+    current, deck, set_aside, placements = draw_playable(board, state.deck)
 
     return GameState(
         board=board,
@@ -208,23 +227,26 @@ def apply(state: GameState, move: Move) -> GameState:
         discarded=state.discarded + set_aside,
         last_events=tuple(events),
         turn=state.turn + 1,
+        placements_cache=(board, current, placements) if current is not None else None,
     )
 
 
 def draw_playable(
     board: Board, deck: tuple[str, ...]
-) -> tuple[str | None, tuple[str, ...], tuple[str, ...]]:
+) -> tuple[str | None, tuple[str, ...], tuple[str, ...], tuple[tuple[Pos, Rotation], ...]]:
     """Draw until a playable tile appears (core-internal, not part of the public API).
 
-    Returns (drawn tile or None, remaining deck, unplaceable tiles set aside)."""
+    Returns (drawn tile or None, remaining deck, unplaceable tiles set aside,
+    the drawn tile's placements -- () when the deck ran out)."""
     rest = list(deck)
     set_aside: list[str] = []
     while rest:
         candidate = rest.pop(0)
-        if placements_for_tile(board, TILE_TYPES[candidate]):
-            return candidate, tuple(rest), tuple(set_aside)
+        placements = placements_for_tile(board, TILE_TYPES[candidate])
+        if placements:
+            return candidate, tuple(rest), tuple(set_aside), tuple(placements)
         set_aside.append(candidate)
-    return None, (), tuple(set_aside)
+    return None, (), tuple(set_aside), ()
 
 
 _ALLOWED_ON: dict[MeepleKind, frozenset[FeatureKind]] = {

@@ -1,3 +1,5 @@
+import dataclasses
+import pickle
 import random
 
 import pytest
@@ -354,3 +356,83 @@ def test_no_tile_can_bridge_neighbour_features_through_a_sibling() -> None:
             same = [f for f in tt.features if f.kind is kind]
             if len(same) >= 2:
                 assert all(len(f.edges) == 1 for f in same), tt.id
+
+
+def test_each_tile_edge_belongs_to_at_most_one_feature() -> None:
+    # _claimed_on_placement and FeatureIndex.with_tile stop at the first feature
+    # owning a side; a side shared by two features would silently drop a merge.
+    for tt in TILE_TYPES.values():
+        seen: set[object] = set()
+        for f in tt.features:
+            assert not (seen & f.edges), tt.id
+            seen |= f.edges
+
+
+def _counting_placements(monkeypatch: pytest.MonkeyPatch) -> list[int]:
+    calls: list[int] = []
+    orig = engine.placements_for_tile
+    monkeypatch.setattr(
+        engine, "placements_for_tile", lambda b, t: calls.append(1) or orig(b, t)
+    )
+    return calls
+
+
+def test_legal_moves_reuses_placements_computed_while_drawing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # MCTS expands each child once: the draw already enumerated the tile's
+    # placements, so legal_moves must not pay for that enumeration a second time.
+    s0 = new_game(0, GameConfig())
+    s1 = apply(s0, legal_moves(s0)[0])
+    calls = _counting_placements(monkeypatch)
+    legal_moves(s1)
+    legal_moves(s0)  # new_game also carries them
+    assert calls == []
+
+
+def test_replaced_board_invalidates_the_carried_placements(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # learner.rotate_state_90 replace()s the board: carried placements for the
+    # old board would be wrong there, so a new board object must recompute.
+    s0 = new_game(0, GameConfig())
+    s1 = apply(s0, legal_moves(s0)[0])
+    calls = _counting_placements(monkeypatch)
+    s2 = dataclasses.replace(s1, board=dict(s1.board))  # new board object, same content
+    assert legal_moves(s2) == legal_moves(s1)
+    assert len(calls) == 1  # s2 recomputed; s1 reused
+
+
+def test_replaced_tile_invalidates_the_carried_placements() -> None:
+    # Same board, different tile: the carried placements belong to the old tile.
+    s0 = new_game(0, GameConfig())
+    s1 = apply(s0, legal_moves(s0)[0])
+    assert s1.current_tile is not None
+    other = next(
+        tid
+        for tid, tt in TILE_TYPES.items()
+        if tid != s1.current_tile
+        and placements_for_tile(s1.board, tt)
+        and placements_for_tile(s1.board, tt)
+        != placements_for_tile(s1.board, TILE_TYPES[s1.current_tile])
+    )
+    s2 = dataclasses.replace(s1, current_tile=other)
+    fresh = dataclasses.replace(s2, placements_cache=None)
+    assert legal_moves(s2) == legal_moves(fresh)
+    assert legal_moves(s2) != legal_moves(s1)
+
+
+def test_carried_placements_never_affect_equality() -> None:
+    # MCTS subtree reuse matches states with ==; a cache must not split them.
+    s0 = new_game(0, GameConfig())
+    assert s0 == dataclasses.replace(s0, placements_cache=None)
+
+
+def test_carried_placements_survive_pickling(monkeypatch: pytest.MonkeyPatch) -> None:
+    # pickle memoises the shared board dict, so the identity check still holds.
+    s0 = new_game(0, GameConfig())
+    s1 = apply(s0, legal_moves(s0)[0])
+    s = pickle.loads(pickle.dumps(s1))
+    calls = _counting_placements(monkeypatch)
+    assert legal_moves(s) == legal_moves(s1)
+    assert calls == []
