@@ -262,9 +262,12 @@ def _header_from_json(row: object) -> ReplayHeader:
                 f"field 'config' must be {{'meeples_per_player': int, 'num_players': int}},"
                 f" got {config_raw!r}"
             )
+        num_players = _int_field(config_raw, "num_players")
+        if not 2 <= num_players <= 5:  # same bounds and message as core.new_game
+            raise RulesError(f"num_players must be 2..5, got {num_players}")
         config = GameConfig(
             meeples_per_player=_int_field(config_raw, "meeples_per_player"),
-            num_players=_int_field(config_raw, "num_players"),
+            num_players=num_players,
         )
     agents_raw = row.get("agents")
     if not (

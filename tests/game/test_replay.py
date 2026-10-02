@@ -228,6 +228,38 @@ def test_v1_two_player_replay_still_loads(tmp_path: Path) -> None:
     list(replay_states(replay))  # engine-verified; must not raise
 
 
+def _write_header_and_end(tmp_path: Path, num_players: int) -> Path:
+    """A structurally complete zero-move v2 file whose seat count is `num_players`."""
+    header = {
+        "v": REPLAY_VERSION,
+        "seed": SEED,
+        "config": {"meeples_per_player": 7, "num_players": num_players},
+        "agents": ["random"] * num_players,
+        "checkpoint": None,
+        "started_at": STARTED_AT,
+    }
+    end = {"end": True, "final_scores": [0] * num_players, "winners": list(range(num_players))}
+    path = tmp_path / f"np{num_players}.jsonl"
+    path.write_text(json.dumps(header) + "\n" + json.dumps(end) + "\n", encoding="utf-8")
+    return path
+
+
+@pytest.mark.parametrize("num_players", [0, 1, 6])
+def test_header_rejects_num_players_outside_2_to_5(tmp_path: Path, num_players: int) -> None:
+    # Without a header check such a file loads as a Replay and only fails much
+    # later (new_game during replay_states) -- or never, for consumers that only
+    # read the header/scores. Reject it where the defect is: the header.
+    path = _write_header_and_end(tmp_path, num_players)
+    with pytest.raises(RulesError, match=rf"num_players must be 2\.\.5, got {num_players}"):
+        load_replay(path)
+
+
+@pytest.mark.parametrize("num_players", [2, 3, 4, 5])
+def test_header_accepts_num_players_2_to_5(tmp_path: Path, num_players: int) -> None:
+    replay = load_replay(_write_header_and_end(tmp_path, num_players))
+    assert replay.header.config.num_players == num_players
+
+
 # --- serde ---
 
 ALL_ACTION_MOVES = (
