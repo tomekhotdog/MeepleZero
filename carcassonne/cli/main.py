@@ -266,6 +266,7 @@ def _bench(args: argparse.Namespace) -> int:
     if args.games < 1:
         print("error: --games must be >= 1", file=sys.stderr)
         return 2
+    torch.manual_seed(args.seed)  # same untrained net every run: bench compares code, not nets
     net = CarcassonneNet(channels=args.channels, n_blocks=args.n_blocks)
     net.eval()
     device = torch.device("cpu")

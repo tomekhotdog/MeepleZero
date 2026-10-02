@@ -1760,6 +1760,29 @@ baseline.
   with 18 distinct `game_id`s and there are 18 replay files. `pgrep -fl
   spawn_main` showed no orphan workers after the stop or after the resume.
 
+### M18b engine hot path
+
+See `docs/plans/2026-10-02-engine-hot-path-plan.md`. From M18b on, `bench`
+seeds torch with `--seed` before building the net, so every run plays the same
+games with the same untrained net. These numbers use `--games 6` and are **not
+directly comparable** to the unseeded `--games 2` numbers above.
+
+- **Before** (2026-10-02, HEAD 6391948 engine + seeded bench,
+  `caffeinate -dims`), `bench --games 6 --sims 16 --seed 0` at the 48×4
+  defaults, run 3 times:
+  ```
+  params=192673
+  games=6 sims=16 channels=48 n_blocks=4 total=96.7s s/game=16.1 games/hour=223.4
+  games=6 sims=16 channels=48 n_blocks=4 total=132.0s s/game=22.0 games/hour=163.6
+  games=6 sims=16 channels=48 n_blocks=4 total=102.9s s/game=17.1 games/hour=210.0
+  ```
+  **Median 210.0 games/hour (102.9s).** Wall-clock time matched `total` on
+  every run, so the machine did not sleep. Run 2 is slow because the machine
+  was not fully idle: a Chrome renderer was using 50–70% of one core, and the
+  load average was about 7–13 on 8 logical cores. With the net seeded, the
+  runs should play the same games, so most of the spread is timing noise
+  (game identity across runs was not verified separately).
+
 ## Deferred (explicitly)
 
 - Arena/gate games through the pool (self-play dominates; follow-up).
