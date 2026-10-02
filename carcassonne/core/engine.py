@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from carcassonne.core.features import FeatureData, FeatureIndex, Meeple, NodeId
 from carcassonne.core.placement import fits, placements_for_tile
 from carcassonne.core.state import Board, PlacedTile
-from carcassonne.core.tiles import TILE_TYPES, TileType
+from carcassonne.core.tiles import TILE_TYPES, TileFeature, TileType, rotated_feature_sides
 from carcassonne.core.types import (
     FeatureKind,
     IllegalMove,
@@ -51,20 +51,59 @@ def legal_moves(state: GameState) -> tuple[Move, ...]:
         return ()
     tt = TILE_TYPES[state.current_tile]
     p = state.current_player
-    any_piece = state.meeples[p] > 0 or state.abbots[p]
+    has_meeple = state.meeples[p] > 0
+    has_abbot = state.abbots[p]
     can_retrieve = state.abbot_at[p] is not None
     moves: list[Move] = []
     for pos, rot in placements_for_tile(state.board, tt):
         moves.append(Move(pos, rot, None))
-        if any_piece:
-            _, idx = _integrated(state.board, state.features, state.current_tile, pos, rot)
-            for i in range(len(tt.features)):
+        if has_meeple or has_abbot:
+            for i, f in enumerate(tt.features):
+                claimed: bool | None = None  # computed lazily, at most once per feature
                 for kind in (MeepleKind.MEEPLE, MeepleKind.ABBOT):
-                    if _meeple_legal(state, idx, tt, pos, i, kind):
+                    if f.kind not in _ALLOWED_ON[kind]:
+                        continue
+                    if kind is MeepleKind.MEEPLE and not has_meeple:
+                        continue
+                    if kind is MeepleKind.ABBOT and not has_abbot:
+                        continue
+                    if claimed is None:
+                        claimed = _claimed_on_placement(state.board, state.features, f, pos, rot)
+                    if not claimed:
                         moves.append(Move(pos, rot, PlaceMeeple(i, kind)))
         if can_retrieve:
             moves.append(Move(pos, rot, RetrieveAbbot()))
     return tuple(moves)
+
+
+def _claimed_on_placement(
+    board: Board, features: FeatureIndex, f: TileFeature, pos: Pos, rot: Rotation
+) -> bool:
+    """Would feature `f` of a tile placed at (pos, rot) join a feature that already
+    holds a meeple?
+
+    Equivalent to integrating the tile and reading the merged root's meeples
+    (`_meeple_legal` on `_integrated`'s index): FeatureIndex.with_tile starts new
+    nodes meeple-less and unions a new city/road node only with the first matching
+    neighbour feature across each of its sides; monasteries/gardens never merge.
+    So the merged root's meeples are the union of those neighbours' roots' meeples
+    -- provided no sibling feature of the same kind can bridge in a further root,
+    which holds because every tile with 2+ city (or road) features gives each a
+    single edge (pinned by test_no_tile_can_bridge_neighbour_features_through_a_sibling).
+    No board/index copy."""
+    if f.kind not in (FeatureKind.CITY, FeatureKind.ROAD):
+        return False
+    for side in rotated_feature_sides(f, rot):
+        npos = pos.neighbor(side)
+        nplaced = board.get(npos)
+        if nplaced is None:
+            continue
+        for j, nf in enumerate(TILE_TYPES[nplaced.type_id].features):
+            if side.opposite in rotated_feature_sides(nf, nplaced.rotation):
+                if features.root_data((npos, j)).meeples:
+                    return True
+                break
+    return False
 
 
 def apply(state: GameState, move: Move) -> GameState:

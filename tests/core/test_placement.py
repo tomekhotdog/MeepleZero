@@ -4,7 +4,7 @@ from carcassonne.core import GameConfig, apply, is_terminal, legal_moves, new_ga
 from carcassonne.core.placement import fits, frontier, placements_for_tile
 from carcassonne.core.state import PlacedTile, empty_board_with_start
 from carcassonne.core.tiles import TILE_TYPES
-from carcassonne.core.types import Pos, Rotation
+from carcassonne.core.types import Pos, Rotation, Side
 
 
 def test_start_board_and_first_tile_placements() -> None:
@@ -69,6 +69,17 @@ def test_placement_table_is_used(monkeypatch) -> None:
     """The hot path must not fall back to per-rotation fits() calls."""
     import carcassonne.core.placement as pl
 
+    rng = random.Random(0)
+    mid = new_game(0, GameConfig())
+    for _ in range(15):  # real fits() while playing: apply validates through it
+        mid = apply(mid, rng.choice(legal_moves(mid)))
     monkeypatch.setattr(pl, "fits", lambda *a: (_ for _ in ()).throw(AssertionError("fits called")))
-    state = new_game(0, GameConfig())
-    assert placements_for_tile(state.board, TILE_TYPES[state.current_tile])
+    for state in (new_game(0, GameConfig()), mid):
+        assert placements_for_tile(state.board, TILE_TYPES[state.current_tile])
+
+
+def test_deltas_match_pos_neighbor() -> None:
+    import carcassonne.core.placement as pl
+
+    for s in Side:
+        assert Pos(0, 0).neighbor(s) == Pos(*pl._DELTAS[s])

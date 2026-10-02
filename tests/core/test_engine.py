@@ -1,5 +1,9 @@
+import random
+
 import pytest
 
+import carcassonne.core.engine as engine
+from carcassonne.core import GameConfig, is_terminal, new_game
 from carcassonne.core.engine import GameState, ScoreEvent, apply, legal_moves
 from carcassonne.core.features import FeatureIndex, Meeple, NodeId
 from carcassonne.core.placement import placements_for_tile
@@ -271,3 +275,82 @@ def test_legal_moves_action_order_is_deterministic() -> None:
     # Placements come out position-sorted then rotation-ascending.
     placements = [(m.pos, m.rotation) for m in moves]
     assert placements == sorted(placements, key=lambda pr: (pr[0], pr[1]))
+
+
+def _reference_legal_moves(state):
+    """The pre-M18b legal_moves: integrates every placement and reads the merged root."""
+    if state.current_tile is None:
+        return ()
+    tt = TILE_TYPES[state.current_tile]
+    p = state.current_player
+    any_piece = state.meeples[p] > 0 or state.abbots[p]
+    can_retrieve = state.abbot_at[p] is not None
+    moves = []
+    for pos, rot in engine.placements_for_tile(state.board, tt):
+        moves.append(Move(pos, rot, None))
+        if any_piece:
+            _, idx = engine._integrated(state.board, state.features, state.current_tile, pos, rot)
+            for i in range(len(tt.features)):
+                for kind in (MeepleKind.MEEPLE, MeepleKind.ABBOT):
+                    if engine._meeple_legal(state, idx, tt, pos, i, kind):
+                        moves.append(Move(pos, rot, PlaceMeeple(i, kind)))
+        if can_retrieve:
+            moves.append(Move(pos, rot, RetrieveAbbot()))
+    return tuple(moves)
+
+
+def _withheld_city_road_options(state, moves) -> int:
+    """Placements where a city/road meeple option is absent although the player
+    has meeples -- i.e. the feature would join one that is already claimed."""
+    if state.current_tile is None or state.meeples[state.current_player] == 0:
+        return 0
+    tt = TILE_TYPES[state.current_tile]
+    present = set(moves)
+    return sum(
+        1
+        for m in moves
+        if m.action is None
+        for i, f in enumerate(tt.features)
+        if f.kind in (FeatureKind.CITY, FeatureKind.ROAD)
+        and Move(m.pos, m.rotation, PlaceMeeple(i, MeepleKind.MEEPLE)) not in present
+    )
+
+
+def test_legal_moves_match_reference_incl_claimed_features() -> None:
+    withheld = 0
+    for seed in range(6):
+        for n in (2, 3):
+            rng = random.Random(seed)
+            state = new_game(seed, GameConfig(num_players=n))
+            while not is_terminal(state):
+                got, want = legal_moves(state), _reference_legal_moves(state)
+                assert got == want
+                withheld += _withheld_city_road_options(state, want)
+                state = apply(state, rng.choice(got))
+    # The fixture must exercise the claimed-feature path, or equality proves nothing.
+    assert withheld > 50, f"only {withheld} claimed-feature cases; add seeds"
+
+
+def test_legal_moves_never_copies_the_board(monkeypatch) -> None:
+    rng = random.Random(0)
+    state = new_game(0, GameConfig())
+    for _ in range(15):  # mid-game board with claimed features; apply needs _integrated
+        state = apply(state, rng.choice(legal_moves(state)))
+    assert any(d.meeples for d in state.features.data.values())
+    monkeypatch.setattr(
+        engine, "_integrated", lambda *a: (_ for _ in ()).throw(AssertionError("copied"))
+    )
+    assert legal_moves(new_game(0, GameConfig()))
+    assert legal_moves(state)
+
+
+def test_no_tile_can_bridge_neighbour_features_through_a_sibling() -> None:
+    """_claimed_on_placement only inspects the neighbours of the feature itself.
+    That is exact only while a tile with 2+ CITY (or ROAD) features gives each of
+    them a single edge: a multi-edge sibling could join the feature's neighbour
+    root AND a second, otherwise unreachable root on placement."""
+    for tt in TILE_TYPES.values():
+        for kind in (FeatureKind.CITY, FeatureKind.ROAD):
+            same = [f for f in tt.features if f.kind is kind]
+            if len(same) >= 2:
+                assert all(len(f.edges) == 1 for f in same), tt.id
