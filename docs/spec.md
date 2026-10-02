@@ -123,6 +123,54 @@ over 2-5 players) remain in force. Note: iteration 3 is a clean break for
 checkpoints and buffers — pre-iteration-3 checkpoints (31×31 format) no
 longer load; there are no real training runs worth migrating.
 
+## Success bars — status (2026-10-02)
+
+Verified at M19 (HEAD `93cc951`): full suite 302 passed / 0 failed, `ruff check`
+clean, `mypy carcassonne` clean.
+
+Iteration 1:
+- ✅ Rules engine proven — `tests/core/test_properties.py`
+  (`test_random_game_invariants`, `test_replay_determinism`, now over 2-5
+  players), `tests/core/test_engine_golden.py::test_engine_behaviour_is_unchanged`.
+- ❌ *not yet run* — trained agent beats GreedyAgent >70%: needs a real
+  training campaign (mechanism built: `evaluate`, arena yardstick).
+- ✅ Browser play vs AI — M19 headless-Chrome game vs checkpoint `step_000004`
+  played to the end with hints on (every `/hint` 200, value readout shown);
+  all 35 AI moves in the saved Replay carry annotations (sims 100, prior/visits
+  `top`); UI, saved and engine-recomputed scores agree.
+- ❌ *not yet run* — multi-day resumable Pi run (needs the hardware; resume is
+  proven in code, see iteration-3 item 4).
+
+Iteration 2 (engine parametric over 2-5 players):
+- ✅ `f254d75` (parametric GameState), `a43bb31` (Replay v2); tests
+  `tests/core/test_game.py::test_new_game_rejects_bad_player_count`,
+  `tests/game/test_match_multiplayer.py`, `tests/web/test_api.py::test_three_player_game_end_to_end`,
+  `::test_five_player_cli_replay_serves_through_api` (`93cc951`). M19 browser
+  4-player game (human vs greedy/random/greedy) ended with UI scores
+  64·18·23·60 = saved Replay = engine recomputation.
+- ✅ RL stack raises on 3+ players — `tests/nn/test_encode.py::test_encode_rejects_non_two_player_state`,
+  `tests/agents/test_mcts.py::test_mcts_rejects_non_two_player_state` (+ the
+  `choose_with_policy` / `visit_policy` variants),
+  `tests/web/test_api.py::test_checkpoint_opponents_rejected_beyond_two_players`;
+  live API: 3-player game with `ckpt:step_000004` → 422 "checkpoint agents are
+  2-player only".
+
+Iteration 3 (dynamic Crop & throughput):
+1. ✅ Invariants — `tests/nn/test_actions.py::test_crop_contains_every_legal_move`,
+   `::test_legal_mask_bijection`, `tests/nn/test_model.py::test_padded_forward_equals_unpadded`,
+   `tests/nn/test_encode.py::test_d4_rotation_equivariance`.
+2. ✅ `param_count` 192,673 ≤ 250k — `tests/nn/test_model.py::test_param_budget` (`89971b6`).
+3. ❌ Single-process throughput 3.51× vs ≥5× (503 vs ≥717 games/hour) — recorded
+   FAIL, accepted by the user (`f5967c5`). Worker scaling ≈2.5× on 4 workers
+   (sub-linear); aggregate ≈8.8× the baseline.
+4. ✅ Smoke train completes and resumes — `tests/training/test_train_smoke.py`;
+   M19 manual run (`--workers 2`): SIGINT during iteration 2 → finished it, exit
+   0, checkpoint `step_000004`, `games_generated=8`; `--resume --iterations 2`
+   → `games_generated=16`, checkpoint `step_000008`; buffer 16 games / 16
+   distinct `game_id`s; no orphan workers.
+5. ❌ *not yet run* — yardstick vs GreedyAgent trajectory comparison needs a
+   real training campaign.
+
 ## Explicitly out of scope
 
 Farmers, expansions beyond the abbot, multiplayer RL training (max^n / vector
