@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 import torch
 
 from carcassonne.agents.mcts import MctsConfig
@@ -107,6 +108,26 @@ def test_train_resume_continues_steps(tmp_path: Path) -> None:
     state = json.loads((reopened.root / "train_state.json").read_text())
     assert (reopened.checkpoints_dir / f"step_{state['best_step']:06d}.pt").is_file()
     assert state["games_generated"] >= 2  # one self-play game per iteration, two runs
+
+
+def test_resume_fails_loud_when_best_checkpoint_is_missing(tmp_path: Path) -> None:
+    # Self-play must only ever use a *gated* net. If the promoted checkpoint is gone,
+    # silently seeding self-play from the latest (un-gated learner) checkpoint would
+    # defeat the arena gate -- so resume must refuse, naming what is missing.
+    cfg = _tiny_cfg()
+    run = TrainingRun.create(tmp_path / "run", run_config_dict(cfg))
+    train(run, cfg, device=DEVICE, max_iterations=0)  # creates the step-0 best
+    best = run.checkpoints_dir / "step_000000.pt"
+    # A later (un-gated) learner checkpoint remains, as after real training.
+    (run.checkpoints_dir / "step_000002.pt").write_bytes(best.read_bytes())
+    best.unlink()
+
+    with pytest.raises(FileNotFoundError) as excinfo:
+        train(TrainingRun.open(run.root), cfg, device=DEVICE, max_iterations=0)
+    message = str(excinfo.value)
+    assert str(best) in message
+    assert "best_step=0" in message
+    assert str(run.root) in message
 
 
 def test_gate_and_yardstick_contract(tmp_path: Path) -> None:

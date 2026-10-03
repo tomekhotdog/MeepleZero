@@ -267,9 +267,9 @@ def _establish_nets(
     """Build the learning net (restored or fresh) and the best net.
 
     A fresh run has no checkpoint yet, so ``Learner.from_run`` builds a fresh net;
-    we snapshot it at step 0 as the initial best. The best net is then loaded from
-    the latest checkpoint (step 0 on a fresh run, the resumed step otherwise), so
-    learning and best start byte-identical.
+    we snapshot it at step 0 as the initial best (so on a fresh run learning and
+    best start byte-identical). The best net is then loaded from the last
+    *promoted* checkpoint recorded in ``train_state.json``.
     """
     learner_cfg = LearnerConfig(
         lr=cfg.lr,
@@ -289,13 +289,20 @@ def _establish_nets(
 
 def _load_best_net(run: TrainingRun, device: torch.device) -> CarcassonneNet:
     """Load the last *promoted* net (from train_state.json), not merely the latest
-    checkpoint -- otherwise a resume would seed self-play from an un-gated net."""
+    checkpoint -- otherwise a resume would seed self-play from an un-gated net.
+
+    Raises :class:`FileNotFoundError` if the promoted checkpoint is gone: nothing
+    prunes checkpoints and the step-0 best is written before ``best_step`` is, so
+    a missing file means the run directory was tampered with. Falling back to the
+    latest checkpoint would silently defeat the arena gate."""
     best_step = _read_state(run)["best_step"]
     path = run.checkpoints_dir / f"step_{best_step:06d}.pt"
-    if not path.is_file():  # defensive: fall back to latest if the record is stale
-        latest = checkpoint.latest(run.checkpoints_dir)
-        assert latest is not None  # _establish_nets guarantees a step-0 checkpoint
-        path = latest
+    if not path.is_file():
+        raise FileNotFoundError(
+            f"training run at {run.root} records best_step={best_step} but its "
+            f"checkpoint {path} is missing; refusing to seed self-play from an "
+            f"un-gated checkpoint"
+        )
     net: CarcassonneNet = checkpoint.load(path, device)["net"]
     net.eval()
     return net
