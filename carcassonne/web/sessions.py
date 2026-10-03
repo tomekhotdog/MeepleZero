@@ -17,6 +17,8 @@ from pathlib import Path
 
 from carcassonne.agents import make_agent
 from carcassonne.core import (
+    MAX_PLAYERS,
+    MIN_PLAYERS,
     GameConfig,
     GameState,
     IllegalMove,
@@ -148,14 +150,17 @@ class SessionStore:
         """Seat the human at ``human_player`` and one agent per spec, in seat order,
         in the remaining seats (so ``len(opponent_specs) + 1`` players).
 
-        The single source of truth for seat validation: a table outside 2..5
-        players or a human seat outside it is an InvalidGameConfig. Checkpoint
+        The single source of truth for seat validation: a table outside
+        MIN_PLAYERS..MAX_PLAYERS players or a human seat outside it is an
+        InvalidGameConfig. Checkpoint
         agents are 2-player only (the RL stack is): seating one in a larger game
         is an UnknownOpponent, the web-level mirror of that guard. Eviction runs
         only once every agent is built, so a rejected request never evicts."""
         num_players = len(opponent_specs) + 1
-        if not 2 <= num_players <= 5:  # mirrors core.new_game's rule
-            raise InvalidGameConfig(f"a game needs 2..5 players, got {num_players}")
+        if not MIN_PLAYERS <= num_players <= MAX_PLAYERS:  # mirrors core.new_game's rule
+            raise InvalidGameConfig(
+                f"a game needs {MIN_PLAYERS}..{MAX_PLAYERS} players, got {num_players}"
+            )
         if not 0 <= human_player < num_players:
             raise InvalidGameConfig(
                 f"human_player {human_player} out of range for {num_players} players"

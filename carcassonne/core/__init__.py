@@ -1,7 +1,7 @@
 """Rules core. Public API: new_game, legal_moves, apply, is_terminal, final_scores,
 plus endgame_potential for heuristic agents."""
 
-from carcassonne.core.config import GameConfig
+from carcassonne.core.config import MAX_PLAYERS, MIN_PLAYERS, GameConfig
 from carcassonne.core.engine import GameState, ScoreEvent, apply, legal_moves
 from carcassonne.core.game import (
     FeatureReport,
@@ -24,6 +24,8 @@ from carcassonne.core.types import (
 )
 
 __all__ = [
+    "MAX_PLAYERS",
+    "MIN_PLAYERS",
     "FeatureReport",
     "GameConfig",
     "GameState",

@@ -11,7 +11,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from carcassonne.agents import make_agent
-from carcassonne.core import GameConfig
+from carcassonne.core import MAX_PLAYERS, MIN_PLAYERS, GameConfig
 from carcassonne.game.arena import run_match
 from carcassonne.game.match import play_game
 from carcassonne.nn.model import DEFAULT_CHANNELS, DEFAULT_N_BLOCKS
@@ -39,7 +39,10 @@ def _build_parser() -> argparse.ArgumentParser:
     sim.add_argument("--p1", help="agent spec for player 1 (2-player shorthand)")
     sim.add_argument(
         "--agents",
-        help="comma-separated agent specs for all seats, 2-5 (e.g. 'greedy,random,random')",
+        help=(
+            f"comma-separated agent specs for all seats, {MIN_PLAYERS}-{MAX_PLAYERS}"
+            " (e.g. 'greedy,random,random')"
+        ),
     )
     sim.add_argument("--seed", type=int, required=True, help="seed of game 0; game i uses seed+i")
     sim.add_argument("--out", type=Path, default=None, help="directory for replay files")
@@ -139,8 +142,8 @@ def _simulate(args: argparse.Namespace) -> int:
     else:
         print("error: pass --agents, or both --p0 and --p1", file=sys.stderr)
         return 2
-    if not 2 <= len(specs) <= 5:
-        print(f"error: need 2-5 agents, got {len(specs)}", file=sys.stderr)
+    if not MIN_PLAYERS <= len(specs) <= MAX_PLAYERS:
+        print(f"error: need {MIN_PLAYERS}-{MAX_PLAYERS} agents, got {len(specs)}", file=sys.stderr)
         return 2
     try:
         agents = tuple(make_agent(s) for s in specs)

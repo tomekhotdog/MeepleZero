@@ -4,7 +4,7 @@ import random
 from collections.abc import Iterator
 from dataclasses import dataclass
 
-from carcassonne.core.config import GameConfig
+from carcassonne.core.config import MAX_PLAYERS, MIN_PLAYERS, GameConfig
 from carcassonne.core.engine import (
     GameState,
     _endgame_value,
@@ -23,8 +23,8 @@ _DEFAULT_CONFIG = GameConfig()
 def new_game(seed: int, config: GameConfig = _DEFAULT_CONFIG) -> GameState:
     """Fresh game: start D tile at (0,0) R0, deck shuffled by `seed`, first tile drawn."""
     n = config.num_players
-    if not 2 <= n <= 5:
-        raise RulesError(f"num_players must be 2..5, got {n}")
+    if not MIN_PLAYERS <= n <= MAX_PLAYERS:
+        raise RulesError(f"num_players must be {MIN_PLAYERS}..{MAX_PLAYERS}, got {n}")
     tiles = [
         t.id for t in DECK for _ in range(t.count - (1 if t.id == START_TILE_ID else 0))
     ]

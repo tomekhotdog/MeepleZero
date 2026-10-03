@@ -16,6 +16,8 @@ from types import TracebackType
 from typing import Any, Self, TextIO
 
 from carcassonne.core import (
+    MAX_PLAYERS,
+    MIN_PLAYERS,
     GameConfig,
     GameState,
     IllegalMove,
@@ -263,8 +265,10 @@ def _header_from_json(row: object) -> ReplayHeader:
                 f" got {config_raw!r}"
             )
         num_players = _int_field(config_raw, "num_players")
-        if not 2 <= num_players <= 5:  # same bounds and message as core.new_game
-            raise RulesError(f"num_players must be 2..5, got {num_players}")
+        if not MIN_PLAYERS <= num_players <= MAX_PLAYERS:  # same rule/message as new_game
+            raise RulesError(
+                f"num_players must be {MIN_PLAYERS}..{MAX_PLAYERS}, got {num_players}"
+            )
         config = GameConfig(
             meeples_per_player=_int_field(config_raw, "meeples_per_player"),
             num_players=num_players,
