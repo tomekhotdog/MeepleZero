@@ -81,7 +81,7 @@ Throughput levers, roughly in order of how much they matter:
   processes, each playing whole games with its own copy of the best net. Self-play
   scales with physical cores, so use 4 on a Pi 5. The learner and arena gating
   still run in the main process.
-- **Tree reuse (automatic).** After each move, MCTS keeps the searched subtree
+- **SubtreeReuse (automatic).** After each move, MCTS keeps the searched subtree
   below the move it played. The next search starts from that subtree, or from
   the matching node one ply deeper when an opponent moved in between, so it
   keeps the visits it already made.

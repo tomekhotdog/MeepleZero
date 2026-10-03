@@ -3,7 +3,7 @@
 High-level user journeys. Status: journeys 1-6 **implemented**, including
 the iteration-2 work (a 2-5 player engine, CLI, and web Play/Replay) and the
 iteration-3 work (dynamic Crop, a ~193k-param fully-convolutional net,
-world-coordinate actions, MCTS tree reuse, and multiprocess self-play).
+world-coordinate actions, MCTS **SubtreeReuse**, and multiprocess self-play).
 Two success criteria are runtime outcomes rather than code — training an
 agent to beat greedy >70%, and a multi-day run on the Pi — see
 `docs/plans/2026-08-22-iteration1-verification.md`.
@@ -45,7 +45,8 @@ bounding box + 1) with **FeaturePlanes** from the feature graph — a ~193k-para
 fully-convolutional net whose evaluation cost scales with actual board area;
 policy targets are keyed by world coordinates. Self-play runs in a
 **SelfplayPool** of worker processes (`--workers`, default one per CPU core),
-and MCTS reuses the searched subtree from one move to the next.
+and MCTS uses **SubtreeReuse** to carry the searched subtree from one move to
+the next.
 
 ## 5. Watch training
 

@@ -40,8 +40,8 @@ file format.
   count), **GreedyAgent** (1-ply heuristic yardstick: my delta minus
   best-of-rest delta; any player count), **MctsAgent** (PUCT search guided by
   a policy/value network, AlphaZero-style; **2-player only, enforced**).
-  MctsAgent reuses the search subtree across moves where the realized tile
-  draw matches the searched branch.
+  MctsAgent uses **SubtreeReuse** across moves where the realized tile draw
+  matches the searched branch.
 
 ## Neural network — dynamic crop, fully convolutional
 
@@ -125,8 +125,11 @@ longer load; there are no real training runs worth migrating.
 
 ## Success bars — status (2026-10-02)
 
-Verified at M19 (HEAD `93cc951`): full suite 302 passed / 0 failed, `ruff check`
-clean, `mypy carcassonne` clean.
+Evidence below is as of M19 (HEAD `93cc951`): full suite 302 passed / 0 failed,
+`ruff check` clean, `mypy carcassonne` clean.
+Final (after the final review fixes, HEAD `f8c7812`): full suite 321 passed /
+0 failed / 0 skipped, `ruff check` clean, `mypy carcassonne` clean, GoldenDigest
+unchanged.
 
 Iteration 1:
 - ✅ Rules engine proven — `tests/core/test_properties.py`

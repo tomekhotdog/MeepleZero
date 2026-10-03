@@ -37,6 +37,12 @@ defined term; in docs, bold on first use per section.
   **Annotation** (the AI's value estimate, policy/visit distribution, sims,
   think time) per move; footer carries final scores and **Winners**.
   Format v2; v1 (2-player) files remain loadable.
+- **GoldenDigest** — the sha256 of Engine behaviour over seeded random games at
+  2 and 4 players: every `legal_moves` result (content *and* order) plus the
+  resulting scores, supplies, current tile, discards, and score events (tile
+  sets hashed sorted) (`tests/core/test_engine_golden.py`). Recorded on the
+  pre-optimisation Engine; a changed digest is a behaviour change. It must
+  never be re-recorded to make a change pass.
 
 ## Agents & search
 
@@ -51,6 +57,15 @@ defined term; in docs, bold on first use per section.
   current player's perspective.
 - **Prior** — the network policy's probability for a Move before search;
   contrasted with **Visits**, the MCTS visit count after search.
+- **SubtreeReuse** — after a Move is played, MctsAgent keeps the played
+  child's search subtree (the *stash*) and starts its next search from it if
+  the new GameState equals the stash itself (self-play: one agent, both seats)
+  or one of the stash's children (arena: the opponent moved in between). Exact,
+  not approximate, because the deck lives in GameState, so an equal state is
+  the same draw. The reused root gets fresh Dirichlet noise, and its inherited
+  Visits flow into the Policy target. Disabled for interactive checkpoint
+  agents (`reuse_tree=False`), because web hints call `choose` and a hint's
+  stash would bias the AI's next reply.
 
 ## Neural network
 
