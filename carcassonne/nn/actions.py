@@ -101,7 +101,12 @@ def move_key(move: Move) -> Key:
 
 
 def key_move(key: Key) -> Move:
-    """Key -> ``Move`` (inverse of :func:`move_key`)."""
+    """Key -> ``Move`` (inverse of :func:`move_key`).
+
+    Part of the reference codec used by tests (no production caller): production
+    only ever maps Move -> Key -> index, via :func:`flat_index` /
+    :func:`move_indices`.
+    """
     x, y, rot, a = key
     return Move(Pos(x, y), Rotation(rot), _decode_action(a))
 
@@ -135,12 +140,22 @@ def flat_index(crop: Crop, key: Key, stride_w: int | None = None) -> int:
 
 
 def encode_move(state: GameState, move: Move) -> int:
-    """``Move`` -> flat index in ``[0, Crop.of(state).n_actions)``."""
+    """``Move`` -> flat index in ``[0, Crop.of(state).n_actions)``.
+
+    Part of the Move<->flat-index reference codec used by tests (no production
+    caller): production code goes through :func:`flat_index` /
+    :func:`move_indices` directly.
+    """
     return flat_index(Crop.of(state), move_key(move))
 
 
 def decode_move(state: GameState, idx: int) -> Move:
-    """Flat index -> ``Move`` (inverse of :func:`encode_move`)."""
+    """Flat index -> ``Move`` (inverse of :func:`encode_move`).
+
+    Part of the Move<->flat-index reference codec used by tests (no production
+    caller): production code goes through :func:`flat_index` /
+    :func:`move_indices` directly.
+    """
     crop = Crop.of(state)
     if not 0 <= idx < crop.n_actions:
         raise RulesError(f"action id {idx} out of range for crop {crop}")

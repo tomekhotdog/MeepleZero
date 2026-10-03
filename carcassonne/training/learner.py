@@ -46,7 +46,7 @@ from numpy.typing import NDArray
 from carcassonne.core.engine import GameState
 from carcassonne.core.features import FeatureIndex, Meeple
 from carcassonne.core.state import Board, PlacedTile
-from carcassonne.core.types import Move, Pos, Rotation
+from carcassonne.core.types import Pos, Rotation
 from carcassonne.nn import checkpoint
 from carcassonne.nn.actions import ACTIONS_PER_CELL, Crop, Key, flat_index, legal_mask, rotate_key
 from carcassonne.nn.encode import encode_state, valid_mask
@@ -242,15 +242,6 @@ def _rot_pos(p: Pos) -> Pos:
 
 def _rot_rotation(r: Rotation) -> Rotation:
     return Rotation((int(r) + 1) % 4)
-
-
-def _rotate_move(move: Move) -> Move:
-    """Rotate a whole placement (cell + tile rotation) 90 degrees clockwise.
-
-    The meeple sub-action is unchanged: it names a *tile-local* feature index,
-    which is invariant under rotating the board.
-    """
-    return Move(_rot_pos(move.pos), _rot_rotation(move.rotation), move.action)
 
 
 def rotate_state_90(state: GameState) -> GameState:

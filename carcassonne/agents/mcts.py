@@ -111,7 +111,7 @@ def _terminal_value(state: GameState) -> float:
     s0, s1 = final_scores(state)
     if s0 == s1:
         return 0.0
-    winner = 0 if s0 > s1 else 1
+    winner = 0 if s0 > s1 else 1  # 2-player only: relies on the _require_two_players guard
     return 1.0 if winner == state.current_player else -1.0
 
 
@@ -185,9 +185,11 @@ class MctsAgent:
 
     def visit_policy(self, state: GameState) -> dict[Move, float]:
         """Run a fresh search and return the normalised visit distribution
-        ``{move: N[i] / sum(N)}`` over legal moves -- the self-play training target
-        and the ``/hint`` source. Noise-free and deterministic (search uses no
-        randomness of its own), so it needs no rng."""
+        ``{move: N[i] / sum(N)}`` over legal moves, without playing a move.
+        Noise-free and deterministic (search uses no randomness of its own), so it
+        needs no rng. No production caller today -- self-play takes its training
+        target from :meth:`choose_with_policy` and web hints go through
+        :meth:`choose`; tests use it to inspect a search in isolation."""
         _require_two_players(state)
         # reuse=False: a hint must neither consume nor depend on the play stash.
         return self._visit_dist(self._search(state, rng=None, add_noise=False, reuse=False))
