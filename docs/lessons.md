@@ -46,6 +46,15 @@
   lost — HEAD ended correct, 174 tests green. The venv/`.pth` iCloud issue above
   is real and independent.
 
+- [rule] 2026-10-03 — **When an orchestration plan executes other plans by reference,
+  tick the source plans' checkboxes as each task completes.** The mega plan tracked
+  M1–M19 while MP/DC/M18b plans kept their own Review boxes and manual browser
+  checklists; `verify` found 19 unchecked items at the very end although the work
+  (incl. headless-Chrome browser checks) had been done. Ticking them retroactively
+  needed digging evidence out of task reports. Rule: when marking an M-task done in
+  the orchestration plan, also tick (with commit/evidence) the matching items in the
+  source plan in the same commit.
+
 - [decision] 2026-10-02 — **The iteration-3 "≥5× single-process self-play" bar was
   missed (3.51×) and accepted as a recorded FAIL.** Profile-driven engine work
   (M18b: table-driven placements, meeple-claim via neighbour roots, carried

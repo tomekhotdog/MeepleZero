@@ -865,10 +865,10 @@ export const playerColor = (p) => [TOKENS.p0, TOKENS.p1, TOKENS.p2, TOKENS.p3, T
 
 **Step 3: Verify (manual checklist — record results in the commit/PR)**
 Run: `uv run pytest tests/web -q` (still green), then `uv run carcassonne serve` and check:
-- [ ] 2-player game vs greedy: identical to before (cards, hint toggle visible, colours).
-- [ ] New game with Players=4, three opponents: 4 colour-coded cards, correct names; consecutive AI seats play automatically after your move; log rows tinted per seat.
-- [ ] Human seat 2 of 3: AIs open the game up to your turn.
-- [ ] Finished 4-player game: banner lists all four finals; replay saved.
+- [x] 2-player game vs greedy: identical to before (cards, hint toggle visible, colours). — ✅ headless Chrome, M16 e9a1669/a75e8e3 (opponent now named per plan, ring chip 'AI')
+- [x] New game with Players=4, three opponents: 4 colour-coded cards, correct names; consecutive AI seats play automatically after your move; log rows tinted per seat. — ✅ headless Chrome, M16 + M19-B
+- [x] Human seat 2 of 3: AIs open the game up to your turn. — ✅ headless Chrome, M16 (4p human seat 2: AIs opened)
+- [x] Finished 4-player game: banner lists all four finals; replay saved. — ✅ headless Chrome, M16 + M19-B (scores cross-checked UI = replay = engine)
 
 **Step 4: Commit**
 ```bash
@@ -898,9 +898,9 @@ git commit -m "feat(web): play view for 2-5 players - palette, dynamic cards, mu
 
 **Step 2: Verify (manual + API)**
 - `uv run carcassonne simulate --agents greedy,random,random,random,random --seed 3 --out replays-tmp` then `uv run carcassonne serve --replays replays-tmp`:
-- [ ] The 5-player replay lists with a correct winners label and opens.
-- [ ] Stepping shows 5 seat colours, per-seat score chips, no win-prob panel, no crash in the console.
-- [ ] A pre-existing 2-player annotated replay still shows search panel + win-prob chart.
+- [x] The 5-player replay lists with a correct winners label and opens. — ✅ headless Chrome, M17 2640175/abc9e12
+- [x] Stepping shows 5 seat colours, per-seat score chips, no win-prob panel, no crash in the console. — ✅ headless Chrome, M17 (71 moves, 0 console errors)
+- [x] A pre-existing 2-player annotated replay still shows search panel + win-prob chart. — ✅ headless Chrome, M17 (v1 replay, header fallback)
 
 **Step 3: Commit**
 ```bash
@@ -945,8 +945,8 @@ uv run mypy carcassonne
 Expected: entire suite green (~174 pre-existing + new), zero lint/type errors.
 
 **Step 3: Runtime bar** (manual, from spec success bar):
-- [ ] Browser: one human vs 3 agents end-to-end, per-seat scoring correct, replay saved and reviewable (spec bar 3).
-- [ ] 2-player checkpoint agent (if a trained checkpoint exists locally) loads and plays unchanged (spec bar 4).
+- [x] Browser: one human vs 3 agents end-to-end, per-seat scoring correct, replay saved and reviewable (spec bar 3). — ✅ headless Chrome, M19-B (64·18·23·60 agree across UI/replay/engine)
+- [x] 2-player checkpoint agent (if a trained checkpoint exists locally) loads and plays unchanged (spec bar 4). — ✅ headless Chrome, M19-B — superseded per mega-plan delta: a post-M12 trained checkpoint plays in the browser, hints 200, AI moves annotated
 
 **Step 4: Commit**
 ```bash
@@ -965,7 +965,7 @@ git commit -m "test(e2e): 5-player CLI replay served through the web API"
 - **Task 10** last.
 
 ## Review
-- [ ] Code review requested (`request-review` skill, five-axis)
-- [ ] All feedback addressed
-- [ ] Final verification passed (`verify` skill: full suite + manual browser checklist)
-- [ ] `docs/features.md` planned items flipped to implemented; spec success bar checked off
+- [x] Code review requested (`request-review` skill, five-axis) — via mega plan M2–M6, M15–M19
+- [x] All feedback addressed (see mega plan entries)
+- [x] Final verification passed (`verify` skill: full suite 321 passed / 0 skipped at b797912 (2026-10-03), ruff + mypy clean; browser checklist headless-verified)
+- [x] `docs/features.md` planned items flipped to implemented; spec success bar checked off (docs/spec.md 'Success bars — status')

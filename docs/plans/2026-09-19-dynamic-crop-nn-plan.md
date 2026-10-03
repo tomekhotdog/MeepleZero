@@ -1859,6 +1859,6 @@ directly comparable** to the unseeded `--games 2` numbers above.
 - MCTS leaf-eval batching, quantization/compile, GNN representation, checkpoint migration.
 
 ## Review
-- [ ] Code review requested (final `code-reviewer` over all tasks)
-- [ ] All feedback addressed
-- [ ] Final verification passed (`verify` skill: full suite green, ruff, mypy, bench recorded)
+- [x] Code review requested (final `code-reviewer` over all tasks) — via mega plan M7–M14, M18, after-M12 Phase B review, final split review
+- [x] All feedback addressed (fixed or triaged into mega plan Follow-ups)
+- [x] Final verification passed (`verify` skill: full suite 321 passed / 0 skipped at b797912 (2026-10-03), ruff + mypy clean; bench recorded — ≥5× bar FAILED at 3.51×, accepted by the user 2026-10-02)

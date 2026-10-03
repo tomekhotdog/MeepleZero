@@ -474,6 +474,6 @@ git commit -m "docs: M18b after-bench (engine hot path)"
 ---
 
 ## Review
-- [ ] Code review requested (two-stage per task)
-- [ ] All feedback addressed
-- [ ] Final verification passed (golden digest unchanged; full suite green; after-bench recorded)
+- [x] Code review requested (two-stage per task) — Tasks 2–4 each reviewed (spec then five-axis, read-only); Task 1 by orchestrator diff + mutation evidence
+- [x] All feedback addressed (canonical digest 06aabb8; review minors folded into Tasks 3–4)
+- [x] Final verification passed (golden digest unchanged; full suite 321 passed / 0 skipped at b797912 (2026-10-03), ruff + mypy clean; after-bench recorded 27e3485 — bar FAIL 3.51×, accepted)
